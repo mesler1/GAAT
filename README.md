@@ -322,6 +322,26 @@ The model name should match what LM Studio shows in the server status bar.
 
 For self-hosted inference servers (vLLM, TGI, llama.cpp server, etc.) that expose an OpenAI-compatible API:
 
+Quick Start for option C:
+Step 1: Start vllm:
+ ```
+CUDA_VISIBLE_DEVICES=7 python -m vllm.entrypoints.openai.api_server \
+      --model Qwen/Qwen2.5-Coder-7B-Instruct \
+      --host 0.0.0.0 \
+      --port 8000 \
+      --enable-auto-tool-choice \
+      --tool-call-parser hermes
+```
+
+
+ Step 2: Start nano claude：
+```
+  export CUSTOM_BASE_URL=http://localhost:8000/v1
+  export CUSTOM_API_KEY=none
+  python nano_claude.py --model custom/Qwen/Qwen2.5-Coder-7B-Instruct
+```
+
+
 ```bash
 # Example: vLLM serving Qwen2.5-Coder-32B
 python -m vllm.entrypoints.openai.api_server \
