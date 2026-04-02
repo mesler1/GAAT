@@ -39,7 +39,7 @@ import argparse
 import textwrap
 from pathlib import Path
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Union
 
 # ── Optional rich for markdown rendering ──────────────────────────────────
 try:
@@ -376,6 +376,18 @@ def cmd_exit(_args: str, _state, _config) -> bool:
     ok("Goodbye!")
     sys.exit(0)
 
+def cmd_skills(_args: str, _state, _config) -> bool:
+    from skills import load_skills
+    skills = load_skills()
+    if not skills:
+        info("No skills found.")
+    else:
+        info(f"Loaded skills ({len(skills)}):")
+        for s in skills:
+            triggers = ", ".join(s.triggers)
+            info(f"  {s.name:16s} {s.description}  [{triggers}]")
+    return True
+
 COMMANDS = {
     "help":        cmd_help,
     "clear":       cmd_clear,
@@ -390,13 +402,14 @@ COMMANDS = {
     "thinking":    cmd_thinking,
     "permissions": cmd_permissions,
     "cwd":         cmd_cwd,
+    "skills":      cmd_skills,
     "exit":        cmd_exit,
     "quit":        cmd_exit,
 }
 
 
-def handle_slash(line: str, state, config) -> bool:
-    """Handle /command [args]. Returns True if handled."""
+def handle_slash(line: str, state, config) -> Union[bool, tuple]:
+    """Handle /command [args]. Returns True if handled, tuple (skill, args) for skill match."""
     if not line.startswith("/"):
         return False
     parts = line[1:].split(None, 1)
@@ -408,6 +421,15 @@ def handle_slash(line: str, state, config) -> bool:
     if handler:
         handler(args, state, config)
         return True
+
+    # Fall through to skill lookup
+    from skills import find_skill
+    skill = find_skill(line)
+    if skill:
+        cmd_parts = line.strip().split(maxsplit=1)
+        args = cmd_parts[1] if len(cmd_parts) > 1 else ""
+        return (skill, args)
+
     err(f"Unknown command: /{cmd}  (type /help for commands)")
     return True
 
@@ -523,7 +545,17 @@ def repl(config: dict, initial_prompt: str = None):
 
         if not user_input:
             continue
-        if handle_slash(user_input, state, config):
+
+        result = handle_slash(user_input, state, config)
+        if isinstance(result, tuple):
+            skill, args = result
+            info(f"Running skill: {skill.name}")
+            try:
+                run_query(f"[Skill: {skill.name}]\n\n{skill.prompt}\n\nUser context: {args}")
+            except KeyboardInterrupt:
+                print(clr("\n  (interrupted)", "yellow"))
+            continue
+        if result:
             continue
 
         try:
