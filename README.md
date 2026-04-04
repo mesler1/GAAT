@@ -6,7 +6,7 @@
   </a>
 
   
-<h1 align="center" style="font-size: 30px;"><strong><em>Nano Claude Code</em></strong>: A Fast, Easy-to-Use Python Reimplementation of Claude Code Supporting Virtually Any Model</h1>
+<h1 align="center" style="font-size: 30px;"><strong><em>Nano Claude Code</em></strong>: A Fast, Easy-to-Use Python Reimplementation of Claude Code Supporting Any Model</h1>
 <p align="center">
     <a href="https://github.com/chauncygu/collection-claude-code-source-code">The newest source of Claude Code</a>
     ·
