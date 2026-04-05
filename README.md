@@ -29,7 +29,7 @@ English | [中文](https://github.com/SafeRL-Lab/nano-claude-code/blob/main/docs
 
 
 
-## � News (Pacific Time)
+## 🚀 News (Pacific Time)
 
 - **03:43 PM, Apr 05, 2026 (v3.05.5)**: 🧠 **Reasoning, Rendering, and Packaging Improvements**
   - 📷 **Native Vision Support**: Local Ollama models (`llava`, `gemma4`, `llama3.2-vision`) now supported via `/image [prompt]`.
