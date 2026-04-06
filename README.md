@@ -6,7 +6,7 @@ English | [中文](https://github.com/SafeRL-Lab/clawspring/blob/main/docs/READM
   </a>
 
   
-<h1 align="center" style="font-size: 30px;"><strong><em>ClawSpring</em></strong>: A Fast, Easy-to-Use Personal AI Assistant That Supports Any Model, Inspired by OpenClaw and Claude Code</h1>
+<h1 align="center" style="font-size: 30px;"><strong><em>ClawSpring (nano claude code)</em></strong>: A Fast, Easy-to-Use Personal AI Assistant That Supports Any Model, Inspired by OpenClaw and Claude Code</h1>
 <p align="center">
     <a href="https://github.com/chauncygu/collection-claude-code-source-code">The newest source of Claude Code</a>
     ·
