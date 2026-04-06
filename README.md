@@ -1,8 +1,8 @@
-English | [中文](https://github.com/SafeRL-Lab/clawspring/blob/main/docs/README.CN.MD) | [Français](https://github.com/SafeRL-Lab/clawspring/blob/main/docs/README.FR.MD) | [한국어](https://github.com/SafeRL-Lab/clawspring/blob/main/docs/README.KO.MD) | [日本語](https://github.com/SafeRL-Lab/clawspring/blob/main/docs/README.JP.MD) | [Deutsch](https://github.com/SafeRL-Lab/clawspring/blob/main/docs/README.DE.MD) | [Português](https://github.com/SafeRL-Lab/clawspring/blob/main/docs/README.ES.MD)
+English | [中文](https://github.com/SafeRL-Lab/cheetahclaws/blob/main/docs/README.CN.MD) | [Français](https://github.com/SafeRL-Lab/cheetahclaws/blob/main/docs/README.FR.MD) | [한국어](https://github.com/SafeRL-Lab/clawspring/blob/main/docs/README.KO.MD) | [日本語](https://github.com/SafeRL-Lab/cheetahclaws/blob/main/docs/README.JP.MD) | [Deutsch](https://github.com/SafeRL-Lab/clawspring/blob/main/docs/README.DE.MD) | [Português](https://github.com/SafeRL-Lab/clawspring/blob/main/docs/README.ES.MD)
  
 <div align="center">
   <a href="[https://github.com/SafeRL-Lab/Robust-Gymnasium](https://github.com/SafeRL-Lab/clawspring)">
-    <img src="https://github.com/SafeRL-Lab/clawspring/blob/main/docs/logo-2.png" alt="Logo" width="280"> 
+    <img src="https://github.com/SafeRL-Lab/cheetahclaws/blob/main/docs/logo-2.png" alt="Logo" width="280"> 
   </a>
 
   
@@ -10,15 +10,15 @@ English | [中文](https://github.com/SafeRL-Lab/clawspring/blob/main/docs/READM
 <p align="center">
     <a href="https://github.com/chauncygu/collection-claude-code-source-code">The newest source of Claude Code</a>
     ·
-    <a href="https://github.com/SafeRL-Lab/clawspring/issues">Issue</a>
+    <a href="https://github.com/SafeRL-Lab/cheetahclaws/issues">Issue</a>
   ·
-    <a href="https://deepwiki.com/SafeRL-Lab/clawspring">Brief Intro</a>
+    <a href="https://deepwiki.com/SafeRL-Lab/cheetahclaws">Brief Intro</a>
   
   </p>
 </div>
 
  <div align=center>
- <img src="https://github.com/SafeRL-Lab/clawspring/blob/main/docs/demo.gif" width="850"/> 
+ <img src="https://github.com/SafeRL-Lab/cheetahclaws/blob/main/docs/demo.gif" width="850"/> 
  </div>
 <div align=center>
 <center style="color:#000000;text-decoration:underline">Task Excution</center>
@@ -28,7 +28,7 @@ English | [中文](https://github.com/SafeRL-Lab/clawspring/blob/main/docs/READM
 ---
 
   <div align=center>
- <img src="https://github.com/SafeRL-Lab/clawspring/blob/main/docs/brainstorm_demo.gif" width="850"/> 
+ <img src="https://github.com/SafeRL-Lab/cheetahclaws/blob/main/docs/brainstorm_demo.gif" width="850"/> 
  </div>
 <div align=center>
 <center style="color:#000000;text-decoration:underline">Brainstorm Mode: Multi-Agent Brainstorm</center>
@@ -39,7 +39,7 @@ English | [中文](https://github.com/SafeRL-Lab/clawspring/blob/main/docs/READM
 ---
 
   <div align=center>
- <img src="https://github.com/SafeRL-Lab/clawspring/blob/main/docs/proactive_demo.gif" width="850"/> 
+ <img src="https://github.com/SafeRL-Lab/cheetahclaws/blob/main/docs/proactive_demo.gif" width="850"/> 
  </div>
 <div align=center>
 <center style="color:#000000;text-decoration:underline">Proactive Mode: Autonomous Agent</center>
@@ -48,7 +48,7 @@ English | [中文](https://github.com/SafeRL-Lab/clawspring/blob/main/docs/READM
 ---
 
   <div align=center>
- <img src="https://github.com/SafeRL-Lab/clawspring/blob/main/docs/ssj_demo.gif" width="850"/> 
+ <img src="https://github.com/SafeRL-Lab/cheetahclaws/blob/main/docs/ssj_demo.gif" width="850"/> 
  </div>
 <div align=center>
 <center style="color:#000000;text-decoration:underline">SSJ Developer Mode: Power Menu Workflow</center>
@@ -57,7 +57,7 @@ English | [中文](https://github.com/SafeRL-Lab/clawspring/blob/main/docs/READM
 ---
 
   <div align=center>
- <img src="https://github.com/SafeRL-Lab/clawspring/blob/main/docs/telegram_demo.gif" width="850"/> 
+ <img src="https://github.com/SafeRL-Lab/cheetahclaws/blob/main/docs/telegram_demo.gif" width="850"/> 
  </div>
 <div align=center>
 <center style="color:#000000;text-decoration:underline">Telegram Bridge: Control cheetahclaws from Your Phone</center>
