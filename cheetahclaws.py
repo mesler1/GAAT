@@ -1998,7 +1998,7 @@ def cmd_worker(args: str, state, config) -> bool:
             return True
 
     # ── Apply worker batch limit ──────────────────────────────────────────
-    worker_count = 1
+    worker_count = len(pending)  # default: run all pending tasks
     if max_workers is not None:
         try:
             worker_count = max(1, int(max_workers))
