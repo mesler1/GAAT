@@ -32,6 +32,15 @@ def _is_in_tg_turn(config: dict) -> bool:
     """
     return getattr(_tg_thread_local, "active", False) or bool(config.get("_in_telegram_turn", False))
 
+
+# ── WeChat turn detection (thread-local) ───────────────────────────────────
+_wx_thread_local = threading.local()
+
+
+def _is_in_wx_turn(config: dict) -> bool:
+    """Return True if the *current thread* is handling a WeChat interaction."""
+    return getattr(_wx_thread_local, "active", False) or bool(config.get("_in_wechat_turn", False))
+
 # ── Tool JSON schemas (sent to Claude API) ─────────────────────────────────
 
 TOOL_SCHEMAS = [
@@ -840,8 +849,27 @@ def _ask_user_question(
 
 
 def ask_input_interactive(prompt: str, config: dict, menu_text: str = None) -> str:
-    """Prompt the user for input, routing to Telegram if in a Telegram turn.
+    """Prompt the user for input, routing to Telegram/WeChat if in a remote turn.
     If menu_text is provided, it is sent ahead of the prompt."""
+    import re as _re_inner, threading as _threading_inner
+    # ── WeChat routing ──
+    is_wx = _is_in_wx_turn(config)
+    if is_wx and "_wx_send_callback" in config:
+        clean_prompt = _re_inner.sub(r'\x1b\[[0-9;]*m', '', prompt).strip()
+        payload = ""
+        if menu_text:
+            clean_menu = _re_inner.sub(r'\x1b\[[0-9;]*m', '', menu_text).strip()
+            payload += f"{clean_menu}\n\n"
+        payload += f"❓ 需要输入\n{clean_prompt}"
+        wx_user_id = config.get("_wx_current_user_id", "")
+        config["_wx_send_callback"](wx_user_id, payload)
+        evt = _threading_inner.Event()
+        config["_wx_input_event"] = evt
+        evt.wait()
+        text = config.pop("_wx_input_value", "").strip()
+        config.pop("_wx_input_event", None)
+        return text
+    # ── Telegram routing ──
     is_tg = _is_in_tg_turn(config)
     if is_tg and "_tg_send_callback" in config:
         token = config.get("telegram_token")

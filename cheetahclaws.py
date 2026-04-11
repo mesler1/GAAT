@@ -57,11 +57,15 @@ Slash commands in REPL:
   /cloudsave auto on|off     Toggle auto-upload on exit
   /cloudsave list   List your cheetahclaws Gists
   /cloudsave load <gist_id>  Download and load a session from Gist
+  /telegram <bot_token> <chat_id>  Start Telegram bridge
+  /telegram stop|status             Stop or check Telegram bridge
+  /wechat <ilink_token>             Start WeChat bridge (iLink Bot API)
+  /wechat stop|status               Stop or check WeChat bridge
   /exit /quit Exit
 """
 from __future__ import annotations
 
-from tools import ask_input_interactive, _tg_thread_local, _is_in_tg_turn
+from tools import ask_input_interactive, _tg_thread_local, _is_in_tg_turn, _wx_thread_local, _is_in_wx_turn
 
 import os
 import re
@@ -2409,6 +2413,593 @@ def cmd_telegram(args: str, _state, config) -> bool:
     return True
 
 
+# ── WeChat (iLink Bot API) bridge ──────────────────────────────────────────
+#
+# Uses Tencent's iLink Bot API to receive/send WeChat messages.
+# Authentication via QR code scan (same as WeixinClawBot / openclaw-weixin).
+# Every outbound reply must echo the latest context_token for that peer.
+# Long-polling via POST /ilink/bot/getupdates (35s timeout).
+#
+# Setup: /wechat login  — scan QR code with WeChat to authenticate
+#        /wechat        — re-start bridge using saved credentials
+#        /wechat stop   — stop the bridge
+#        /wechat status — show current status
+#
+# Prerequisite: enable the "ClawBot" plugin inside WeChat
+#   (WeChat → Me → Settings → Plugins → ClawBot)
+
+import base64 as _b64_mod
+import struct as _struct_mod
+import secrets as _secrets_mod
+
+_wechat_thread = None
+_wechat_stop = threading.Event()
+
+_ILINK_BASE_URL       = "https://ilinkai.weixin.qq.com"
+_ILINK_APP_ID         = "bot"
+_ILINK_CLIENT_VERSION = (2 << 16) | (2 << 8) | 0
+_ILINK_CHANNEL_VERSION = "2.2.0"
+_ILINK_DEFAULT_BOT_TYPE = "3"
+
+_WX_EP_GET_UPDATES   = "ilink/bot/getupdates"
+_WX_EP_SEND_MESSAGE  = "ilink/bot/sendmessage"
+_WX_EP_SEND_TYPING   = "ilink/bot/sendtyping"
+_WX_EP_GET_BOT_QR    = "ilink/bot/get_bot_qrcode"
+_WX_EP_GET_QR_STATUS = "ilink/bot/get_qrcode_status"
+
+_WX_LONG_POLL_TIMEOUT = 37   # seconds — iLink long-poll is 35 s
+_WX_API_TIMEOUT       = 15
+_WX_QR_TIMEOUT        = 37
+
+_WX_MSG_TYPE_BOT   = 2
+_WX_MSG_STATE_DONE = 2
+_WX_ITEM_TEXT      = 1
+_WX_TYPING_START   = 1
+
+# In-memory context-token store: {user_id: token}
+# context_token must be echoed back in every reply to the same peer.
+_wx_context_tokens: dict = {}
+
+# Dedup set of seen message sequence numbers (prevents double-processing on reconnect)
+_wx_seen_msgids: set = set()
+
+
+def _wx_random_uin() -> str:
+    """Generate a random X-WECHAT-UIN header value (base64 of a uint32 string)."""
+    value = _struct_mod.unpack(">I", _secrets_mod.token_bytes(4))[0]
+    return _b64_mod.b64encode(str(value).encode()).decode("ascii")
+
+
+def _wx_app_headers() -> dict:
+    """Minimal iLink app identity headers (no auth token)."""
+    return {
+        "iLink-App-Id": _ILINK_APP_ID,
+        "iLink-App-ClientVersion": str(_ILINK_CLIENT_VERSION),
+    }
+
+
+def _wx_auth_headers(token: str, body: str) -> dict:
+    """Full iLink headers including Bearer token auth."""
+    return {
+        "Content-Type": "application/json",
+        "AuthorizationType": "ilink_bot_token",
+        "Authorization": f"Bearer {token}",
+        "Content-Length": str(len(body.encode("utf-8"))),
+        "X-WECHAT-UIN": _wx_random_uin(),
+        **_wx_app_headers(),
+    }
+
+
+def _wx_get(base_url: str, endpoint: str, timeout: int = _WX_QR_TIMEOUT) -> dict | None:
+    """Unauthenticated GET to iLink API (used during QR login flow)."""
+    import urllib.request
+    url = f"{base_url.rstrip('/')}/{endpoint}"
+    req = urllib.request.Request(url, headers=_wx_app_headers())
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read())
+    except Exception:
+        return None
+
+
+def _wx_post(base_url: str, endpoint: str, token: str, payload: dict,
+             timeout: int = _WX_API_TIMEOUT) -> dict | None:
+    """Authenticated POST to iLink API. Returns parsed JSON or None on error."""
+    import urllib.request
+    payload["base_info"] = {"channel_version": _ILINK_CHANNEL_VERSION}
+    body = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    url = f"{base_url.rstrip('/')}/{endpoint}"
+    data = body.encode("utf-8")
+    req = urllib.request.Request(url, data=data, headers=_wx_auth_headers(token, body))
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read())
+    except Exception:
+        return None
+
+
+def _wx_get_updates(base_url: str, token: str, sync_buf: str) -> dict | None:
+    """Long-poll for new messages.
+
+    Unlike _wx_post, a socket timeout here is NORMAL (server holds the
+    connection for up to 35 s with no messages, then closes it).
+    Returns {"ret":0,"msgs":[],"get_updates_buf":sync_buf} on timeout so
+    the caller can continue polling without treating it as an error.
+    Returns None only on genuine connectivity failures.
+    """
+    import urllib.request, socket as _socket
+    payload = {
+        "get_updates_buf": sync_buf,
+        "base_info": {"channel_version": _ILINK_CHANNEL_VERSION},
+    }
+    body = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    url = f"{base_url.rstrip('/')}/{_WX_EP_GET_UPDATES}"
+    data = body.encode("utf-8")
+    req = urllib.request.Request(url, data=data, headers=_wx_auth_headers(token, body))
+    try:
+        with urllib.request.urlopen(req, timeout=_WX_LONG_POLL_TIMEOUT) as resp:
+            return json.loads(resp.read())
+    except (_socket.timeout, TimeoutError):
+        # Normal long-poll expiry — no messages in this window
+        return {"ret": 0, "errcode": 0, "msgs": [], "get_updates_buf": sync_buf}
+    except Exception:
+        return None
+
+
+def _wx_print_qr(url_or_value: str) -> None:
+    """Print QR code in terminal. Falls back to printing the URL."""
+    try:
+        import qrcode  # pip install qrcode
+        qr = qrcode.QRCode(border=1)
+        qr.add_data(url_or_value)
+        qr.make(fit=True)
+        qr.print_ascii(invert=True)
+    except ImportError:
+        # No qrcode library — just print the URL so the user can open it
+        print(f"\n  {url_or_value}\n")
+        info("(Install 'qrcode' for inline QR rendering: pip install qrcode)")
+
+
+def _wx_qr_login(config: dict, bot_type: str = _ILINK_DEFAULT_BOT_TYPE,
+                 timeout_seconds: int = 480) -> bool:
+    """
+    Interactive iLink QR login flow (blocking, runs in main thread).
+
+    Fetches a QR code, renders it in the terminal, then polls
+    get_qrcode_status until the user confirms or the deadline passes.
+    On success, saves wechat_token + wechat_base_url to config.
+    Returns True on success, False on failure/timeout.
+    """
+    from config import save_config
+    import time as _time
+
+    info("Fetching WeChat QR code from iLink...")
+    base_url = _ILINK_BASE_URL
+
+    qr_resp = _wx_get(base_url, f"{_WX_EP_GET_BOT_QR}?bot_type={bot_type}")
+    if not qr_resp:
+        err("Could not reach iLink API. Check your network connection.")
+        return False
+
+    qrcode_value = str(qr_resp.get("qrcode") or "")
+    qrcode_img   = str(qr_resp.get("qrcode_img_content") or "")
+    if not qrcode_value:
+        err("iLink returned an empty QR code. Try again later.")
+        return False
+
+    print()
+    print(clr("  请用微信扫描以下二维码 / Scan with WeChat:", "cyan"))
+    _wx_print_qr(qrcode_img or qrcode_value)
+    print(clr("  等待扫码中... / Waiting for scan...", "cyan"))
+
+    deadline      = _time.time() + timeout_seconds
+    refresh_count = 0
+    current_base  = base_url
+
+    while _time.time() < deadline:
+        status_resp = _wx_get(
+            current_base,
+            f"{_WX_EP_GET_QR_STATUS}?qrcode={qrcode_value}",
+        )
+        if status_resp is None:
+            _time.sleep(1)
+            continue
+
+        status = str(status_resp.get("status") or "wait")
+
+        if status == "wait":
+            print(".", end="", flush=True)
+        elif status == "scaned":
+            print()
+            info("已扫码，请在微信里点击确认 / Scanned — confirm in WeChat...")
+        elif status == "scaned_but_redirect":
+            redirect_host = str(status_resp.get("redirect_host") or "")
+            if redirect_host:
+                current_base = f"https://{redirect_host}"
+        elif status == "expired":
+            refresh_count += 1
+            if refresh_count > 3:
+                print()
+                err("二维码多次过期 / QR code expired too many times. Please try again.")
+                return False
+            print()
+            info(f"二维码已过期，正在刷新... ({refresh_count}/3) / QR expired, refreshing...")
+            qr_resp = _wx_get(base_url, f"{_WX_EP_GET_BOT_QR}?bot_type={bot_type}")
+            if not qr_resp:
+                err("Failed to refresh QR code.")
+                return False
+            qrcode_value = str(qr_resp.get("qrcode") or "")
+            qrcode_img   = str(qr_resp.get("qrcode_img_content") or "")
+            _wx_print_qr(qrcode_img or qrcode_value)
+        elif status == "confirmed":
+            token    = str(status_resp.get("bot_token") or "")
+            new_base = str(status_resp.get("baseurl") or base_url)
+            acct_id  = str(status_resp.get("ilink_bot_id") or "")
+            if not token:
+                err("iLink confirmed but returned no token. Try again.")
+                return False
+            print()
+            config["wechat_token"]    = token
+            config["wechat_base_url"] = new_base
+            if acct_id:
+                config["wechat_account_id"] = acct_id
+            save_config(config)
+            ok(f"微信登录成功 / WeChat authenticated (account: {acct_id or 'unknown'})")
+            return True
+
+        _time.sleep(1)
+
+    print()
+    err("登录超时 / WeChat QR login timed out. Please try again.")
+    return False
+
+
+def _wx_send(user_id: str, text: str, config: dict) -> None:
+    """Send a text message to a WeChat user via iLink, echoing context_token."""
+    token    = config.get("wechat_token", "")
+    base_url = config.get("wechat_base_url", _ILINK_BASE_URL)
+    if not token or not user_id:
+        return
+    ctx_token = _wx_context_tokens.get(user_id)
+    MAX = 2000  # WeChat renders long messages poorly; keep chunks small
+    chunks = [text[i:i+MAX] for i in range(0, max(len(text), 1), MAX)]
+    for chunk in chunks:
+        msg: dict = {
+            "from_user_id": "",
+            "to_user_id": user_id,
+            "client_id": str(uuid.uuid4()),
+            "message_type": _WX_MSG_TYPE_BOT,
+            "message_state": _WX_MSG_STATE_DONE,
+            "item_list": [{"type": _WX_ITEM_TEXT, "text_item": {"text": chunk}}],
+        }
+        if ctx_token:
+            msg["context_token"] = ctx_token
+        _wx_post(base_url, _WX_EP_SEND_MESSAGE, token, {"msg": msg})
+
+
+def _wx_typing(user_id: str, config: dict) -> None:
+    """Send typing indicator if a typing_ticket is cached for this user."""
+    ticket = config.get(f"_wx_typing_ticket_{user_id}")
+    if not ticket:
+        return
+    token    = config.get("wechat_token", "")
+    base_url = config.get("wechat_base_url", _ILINK_BASE_URL)
+    _wx_post(base_url, _WX_EP_SEND_TYPING, token, {
+        "ilink_user_id": user_id,
+        "typing_ticket": ticket,
+        "status": _WX_TYPING_START,
+    }, timeout=5)
+
+
+def _wx_typing_loop(user_id: str, stop_event: threading.Event, config: dict) -> None:
+    """Send typing indicator every 4 s until stop_event is set."""
+    while not stop_event.is_set():
+        _wx_typing(user_id, config)
+        stop_event.wait(4)
+
+
+def _wx_poll_loop(token: str, base_url: str, config: dict) -> None:
+    """Long-polling loop: fetch messages from iLink, run them through the agent."""
+    run_query_cb = config.get("_run_query_callback")
+    sync_buf = ""
+    consecutive_failures = 0
+
+    # Register send callback so ask_input_interactive can route to WeChat
+    config["_wx_send_callback"] = lambda uid, txt: _wx_send(uid, txt, config)
+
+    while not _wechat_stop.is_set():
+        try:
+            # Use _wx_get_updates which correctly treats socket.timeout as
+            # "empty result" rather than an error (long-poll semantics).
+            result = _wx_get_updates(base_url, token, sync_buf)
+            if result is None:
+                # Genuine connectivity failure
+                consecutive_failures += 1
+                if consecutive_failures >= 3:
+                    print(clr("\n  ⚠ WeChat: repeated connection failures, retrying in 30s...", "yellow"))
+                    _wechat_stop.wait(30)
+                    consecutive_failures = 0
+                else:
+                    _wechat_stop.wait(2)
+                continue
+            consecutive_failures = 0
+
+            # iLink uses both "ret" and "errcode"; either may be absent (default 0 = OK)
+            ret     = result.get("ret",     0)
+            errcode = result.get("errcode", 0)
+            if ret not in (0, None) or errcode not in (0, None):
+                if ret == -14 or errcode == -14:  # SESSION_EXPIRED
+                    print(clr("\n  ⚠ WeChat: session expired — re-authenticate with /wechat login", "yellow"))
+                    config.pop("wechat_token", None)
+                    config.pop("wechat_base_url", None)
+                    from config import save_config
+                    save_config(config)
+                    break
+                errmsg = result.get("errmsg", "")
+                print(clr(f"\n  ⚠ WeChat: API error ret={ret} errcode={errcode} {errmsg}, retrying...", "yellow"))
+                _wechat_stop.wait(5)
+                continue
+
+            # Always update sync_buf even when msgs is empty
+            new_buf = result.get("get_updates_buf")
+            if new_buf:
+                sync_buf = new_buf
+
+            for msg in result.get("msgs") or []:
+                # Update context_token for this peer so we echo it back
+                ctx_tok  = msg.get("context_token")
+                from_uid = str(msg.get("from_user_id") or "").strip()
+                if ctx_tok and from_uid:
+                    _wx_context_tokens[from_uid] = ctx_tok
+
+                # Dedup by message_id / seq / client_id
+                msg_id = msg.get("message_id") or msg.get("seq") or msg.get("client_id") or ""
+                if msg_id and msg_id in _wx_seen_msgids:
+                    continue
+                if msg_id:
+                    _wx_seen_msgids.add(msg_id)
+                    if len(_wx_seen_msgids) > 2000:
+                        oldest = list(_wx_seen_msgids)[:500]
+                        for k in oldest:
+                            _wx_seen_msgids.discard(k)
+
+                # Only process user → bot messages (message_type == 1)
+                # message_type == 2 is our own bot echo; skip it.
+                if msg.get("message_type") == 2:
+                    continue
+
+                # Extract text content — iLink wraps text in item_list
+                text = ""
+                for item in msg.get("item_list") or []:
+                    if item.get("type") == _WX_ITEM_TEXT:
+                        text = (item.get("text_item") or {}).get("text", "").strip()
+                        break
+                # Fallback: some versions put text directly in "content"
+                if not text:
+                    text = str(msg.get("content") or msg.get("text") or "").strip()
+
+                if not text or not from_uid:
+                    continue
+
+                # Intercept if a permission prompt is waiting for this user
+                evt = config.get("_wx_input_event")
+                if evt and config.get("_wx_current_user_id") == from_uid:
+                    config["_wx_input_value"] = text
+                    evt.set()
+                    continue
+
+                # Show on local terminal
+                print(clr(f"\n  📩 WeChat [{from_uid[:8]}]: {text}", "cyan"))
+
+                # Handle /stop from WeChat side
+                if text.strip().lower() in ("/stop", "/off"):
+                    _wx_send(from_uid, "🔴 cheetahclaws bridge stopped.", config)
+                    _wechat_stop.set()
+                    break
+
+                if text.strip().lower() == "/start":
+                    _wx_send(from_uid, "🟢 cheetahclaws bridge is active. Send me anything.", config)
+                    continue
+
+                # Handle slash commands forwarded from WeChat
+                if text.strip().startswith("/"):
+                    slash_cb = config.get("_handle_slash_callback")
+                    if slash_cb:
+                        def _wx_slash_runner(_slash_text, _uid):
+                            _wx_thread_local.active = True
+                            config["_wx_current_user_id"] = _uid
+                            try:
+                                cmd_type = slash_cb(_slash_text)
+                            except Exception as e:
+                                _wx_send(_uid, f"⚠ Error: {e}", config)
+                                return
+                            finally:
+                                _wx_thread_local.active = False
+                                config.pop("_wx_current_user_id", None)
+                            if cmd_type == "simple":
+                                cmd_name = _slash_text.strip().split()[0]
+                                _wx_send(_uid, f"✅ {cmd_name} executed.", config)
+                                return
+                            wx_state = config.get("_state")
+                            if wx_state and wx_state.messages:
+                                for m in reversed(wx_state.messages):
+                                    if m.get("role") == "assistant":
+                                        content = m.get("content", "")
+                                        if isinstance(content, list):
+                                            parts = [
+                                                b.get("text", "") if isinstance(b, dict) and b.get("type") == "text" else (b if isinstance(b, str) else "")
+                                                for b in content
+                                            ]
+                                            content = "\n".join(p for p in parts if p)
+                                        if content:
+                                            _wx_send(_uid, content, config)
+                                        break
+                        threading.Thread(
+                            target=_wx_slash_runner, args=(text, from_uid), daemon=True
+                        ).start()
+                    continue
+
+                # Run the query in a background thread (non-blocking poll loop)
+                def _wx_bg_runner(q_text, uid):
+                    _typing_stop = threading.Event()
+                    _typing_t = threading.Thread(
+                        target=_wx_typing_loop, args=(uid, _typing_stop, config), daemon=True
+                    )
+                    _typing_t.start()
+
+                    config["_wx_current_user_id"] = uid
+                    config["_in_wechat_turn"] = True
+                    try:
+                        if run_query_cb:
+                            run_query_cb(q_text)
+                    except Exception as e:
+                        _typing_stop.set()
+                        _wx_send(uid, f"⚠ Error: {e}", config)
+                        return
+                    finally:
+                        config.pop("_in_wechat_turn", None)
+                        config.pop("_wx_current_user_id", None)
+
+                    _typing_stop.set()
+
+                    # Grab last assistant response and send it
+                    state = config.get("_state")
+                    if state and state.messages:
+                        for m in reversed(state.messages):
+                            if m.get("role") == "assistant":
+                                content = m.get("content", "")
+                                if isinstance(content, list):
+                                    parts = [
+                                        b.get("text", "") if isinstance(b, dict) and b.get("type") == "text" else (b if isinstance(b, str) else "")
+                                        for b in content
+                                    ]
+                                    content = "\n".join(p for p in parts if p)
+                                if content:
+                                    _wx_send(uid, content, config)
+                                break
+
+                threading.Thread(target=_wx_bg_runner, args=(text, from_uid), daemon=True).start()
+
+        except Exception:
+            _wechat_stop.wait(5)
+
+    global _wechat_thread
+    _wechat_thread = None
+    config.pop("_wx_send_callback", None)
+
+
+def _wx_start_bridge(_state, config) -> None:
+    """Start the WeChat polling thread (assumes token + base_url already in config)."""
+    global _wechat_thread, _wechat_stop
+    token    = config.get("wechat_token", "")
+    base_url = config.get("wechat_base_url", _ILINK_BASE_URL)
+    config["_state"] = _state
+    _wechat_stop = threading.Event()
+    _wechat_thread = threading.Thread(
+        target=_wx_poll_loop, args=(token, base_url, config), daemon=True
+    )
+    _wechat_thread.start()
+    ok(f"WeChat bridge started.")
+    info("Send a message from WeChat — it will be processed here.")
+    info("Stop with /wechat stop or send /stop from WeChat.")
+
+
+def cmd_wechat(args: str, _state, config) -> bool:
+    """WeChat bridge via Tencent iLink Bot API — authenticate with QR code scan.
+
+    Prerequisites:
+      Enable "ClawBot" in WeChat: Me → Settings → Plugins → ClawBot
+
+    Usage:
+      /wechat login      — scan QR code with WeChat to authenticate & start
+      /wechat            — start bridge using saved credentials (login if needed)
+      /wechat stop       — stop the bridge
+      /wechat status     — show current status
+      /wechat logout     — clear saved credentials
+
+    Credentials are saved so subsequent launches re-use them automatically.
+    """
+    global _wechat_thread, _wechat_stop
+    from config import save_config
+
+    sub = args.strip().split()[0].lower() if args.strip() else ""
+
+    # ── /wechat stop ──
+    if sub in ("stop", "off"):
+        if _wechat_thread and _wechat_thread.is_alive():
+            _wechat_stop.set()
+            _wechat_thread.join(timeout=5)
+            _wechat_thread = None
+            ok("WeChat bridge stopped.")
+        else:
+            warn("WeChat bridge is not running.")
+        return True
+
+    # ── /wechat status ──
+    if sub == "status":
+        running  = _wechat_thread and _wechat_thread.is_alive()
+        token    = config.get("wechat_token", "")
+        base_url = config.get("wechat_base_url", _ILINK_BASE_URL)
+        acct     = config.get("wechat_account_id", "")
+        if running:
+            ok(f"WeChat bridge running  (account: {acct or 'unknown'}, iLink: {base_url})")
+        elif token:
+            info("Configured but not running. Use /wechat to start.")
+        else:
+            info("Not authenticated. Use /wechat login to scan the QR code.")
+        return True
+
+    # ── /wechat logout ──
+    if sub == "logout":
+        if _wechat_thread and _wechat_thread.is_alive():
+            _wechat_stop.set()
+            _wechat_thread.join(timeout=5)
+            _wechat_thread = None
+        config.pop("wechat_token", None)
+        config.pop("wechat_base_url", None)
+        config.pop("wechat_account_id", None)
+        save_config(config)
+        ok("WeChat credentials cleared.")
+        return True
+
+    # ── /wechat login — interactive QR code authentication ──
+    if sub == "login":
+        if _wechat_thread and _wechat_thread.is_alive():
+            warn("Bridge is already running. Use /wechat stop first.")
+            return True
+        if not _wx_qr_login(config):
+            return True
+        _wx_start_bridge(_state, config)
+        return True
+
+    # ── /wechat (no args) — start with saved creds, or login if none ──
+    if _wechat_thread and _wechat_thread.is_alive():
+        warn("WeChat bridge is already running. Use /wechat stop first.")
+        return True
+
+    token = config.get("wechat_token", "")
+    if not token:
+        info("No saved credentials — starting QR login flow.")
+        if not _wx_qr_login(config):
+            return True
+        _wx_start_bridge(_state, config)
+        return True
+
+    # Quick connectivity check before starting the bridge
+    base_url = config.get("wechat_base_url", _ILINK_BASE_URL)
+    probe = _wx_post(base_url, _WX_EP_GET_UPDATES, token, {"get_updates_buf": ""}, timeout=8)
+    if probe is not None and probe.get("ret") == -14:
+        warn("Session expired. Re-authenticating via QR code...")
+        config.pop("wechat_token", None)
+        config.pop("wechat_base_url", None)
+        save_config(config)
+        if not _wx_qr_login(config):
+            return True
+
+    _wx_start_bridge(_state, config)
+    return True
+
+
 # ── Voice command (loaded from modular/voice/cmd.py via _load_external_commands_into) ──
 
 
@@ -3106,6 +3697,8 @@ COMMANDS = {
     "worker":      cmd_worker,
     "ssj":         cmd_ssj,
     "telegram":    cmd_telegram,
+    "wechat":      cmd_wechat,
+    "weixin":      cmd_wechat,
     "checkpoint":  cmd_checkpoint,
     "rewind":      cmd_rewind,
     "plan":        cmd_plan,
@@ -3214,6 +3807,7 @@ _CMD_META: dict[str, tuple[str, list[str]]] = {
     "worker":      ("Auto-implement pending tasks",       []),
     "ssj":         ("SSJ Developer Mode — power menu",    []),
     "telegram":    ("Telegram bot bridge",                ["stop", "status"]),
+    "wechat":      ("WeChat bridge (iLink Bot API)",      ["stop", "status"]),
     **({"video": ("AI video factory: story→voice→images→mp4", ["status", "niches"])} if _VIDEO_AVAILABLE else {}),
     "checkpoint":  ("List / restore checkpoints",          ["clear"]),
     "rewind":      ("Rewind to checkpoint (alias)",        ["clear"]),

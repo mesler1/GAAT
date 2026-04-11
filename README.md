@@ -73,11 +73,20 @@ English | [中文](https://github.com/SafeRL-Lab/clawspring/blob/main/docs/READM
 ## 🔥🔥🔥 News (Pacific Time)
 
 
-- Apr 11, 2026 (**v3.05.58**): **Fix `max_tokens` → `max_completion_tokens` for newer OpenAI models; add gpt-5 / o4 family**
+- Apr 11, 2026 (**v3.05.57**): **WeChat bridge via iLink Bot API**
+  - **WeChat bridge (`/wechat`)** (`cheetahclaws.py`) — `/wechat login` authenticates with WeChat by scanning a QR code (same iLink Bot API used by the official WeixinClawBot / `@tencent-weixin/openclaw-weixin` plugin). After a one-time scan, `token` + `base_url` are saved to `~/.cheetahclaws/config.json` and the bridge auto-starts on every subsequent launch. The bridge runs a long-poll loop (`POST /ilink/bot/getupdates`, 35-second window) in a daemon thread — normal timeouts are handled transparently and do not trigger backoff or reconnect.
+  - **context_token echo** — the iLink protocol requires each reply to include the sender's latest `context_token`. The bridge caches this per `user_id` in memory and echoes it automatically on every outbound message.
+  - **Typing indicator** — a `sendtyping` request is sent every 4 seconds while the model processes, keeping the WeChat chat responsive.
+  - **Slash command passthrough** — send `/cost`, `/model gpt-4o`, `/clear`, etc. from WeChat and they execute in cheetahclaws; results are sent back to the same WeChat conversation.
+  - **Session expiry handling** — `errcode -14` (session expired) clears saved credentials and prompts re-authentication on the next `/wechat` call.
+  - **Message deduplication** — `message_id` / `seq` dedup prevents double-processing on reconnect.
+  - **`/wechat stop` / `/wechat logout` / `/wechat status`** — full lifecycle control from the terminal or from WeChat itself (`/stop`).
+
+- Apr 11, 2026: **Fix `max_tokens` → `max_completion_tokens` for newer OpenAI models; add gpt-5 / o4 family**
   - **Bug fix: `max_tokens` rejected by gpt-5-nano / o4-mini / o3** (`providers.py`) — newer OpenAI models have removed the legacy `max_tokens` parameter and require `max_completion_tokens` instead. Any request using `max_tokens` with these models was returning a 400 error and exhausting all retries. The OpenAI provider now unconditionally sends `max_completion_tokens`; all other OpenAI-compatible providers (Ollama, vLLM, Gemini, Kimi, …) continue to use `max_tokens`, which their servers expect.
   - **New models listed** — `gpt-5`, `gpt-5-nano`, `gpt-5-mini`, `o3`, `o4-mini` added to the known OpenAI model list so they appear in `/model` suggestions and get the correct token-cap from the provider config.
 
-- Apr 10, 2026 (**v3.05.57**): **Tmux integration, shell escape (`!command`), retry mechanism, improved token estimator**
+- Apr 10, 2026: **Tmux integration, shell escape (`!command`), retry mechanism, improved token estimator**
   - **Native tmux integration** (`tmux_tools.py`) — 11 tmux tools for the AI agent: `TmuxListSessions`, `TmuxNewSession`, `TmuxSplitWindow`, `TmuxSendKeys`, `TmuxCapture`, `TmuxListPanes`, `TmuxSelectPane`, `TmuxKillPane`, `TmuxNewWindow`, `TmuxListWindows`, `TmuxResizePane`. Auto-detected at startup — tools register only when `tmux` (Linux/macOS) or `psmux` (Windows) is found; zero impact if absent. The AI can now run long-lived commands in visible panes that outlive the Bash tool's timeout, read output on demand with `TmuxCapture`, and build autonomous monitoring loops. System prompt is automatically extended with tmux usage guidance when the binary is present.
   - **Shell escape** (`cheetahclaws.py`) — type `!` followed by any shell command (`!git status`, `!ls -la`, `!python --version`) to execute it directly without AI involvement. Output prints inline; control returns to the prompt immediately.
 
@@ -136,6 +145,7 @@ CheetahClaws: **A Lightweight** and **Easy-to-Use** Python Reimplementation of C
   * [Brainstorm](#brainstorm)
   * [SSJ Developer Mode](#ssj-developer-mode)
   * [Telegram Bridge](#telegram-bridge)
+  * [WeChat Bridge](#wechat-bridge)
   * [Video Content Factory](#video-content-factory)
   * [TTS Content Factory](#tts-content-factory)
   * [Tmux Integration](#tmux-integration)
@@ -199,6 +209,7 @@ Claude Code is a powerful, production-grade AI coding assistant — but its sour
 - **Cloud session sync** — `/cloudsave` backs up conversations to private GitHub Gists with zero extra dependencies; restore any past session on any machine with `/cloudsave load <id>`.
 - **SSJ Developer Mode** — `/ssj` opens a persistent power menu with 10 workflow shortcuts: Brainstorm → TODO → Worker pipeline, expert debate, code review, README generation, commit helper, and more. Stays open between actions; supports `/command` passthrough.
 - **Telegram Bot Bridge** — `/telegram <token> <chat_id>` turns cheetahclaws into a Telegram bot: receive user messages, run the model, and send back responses — all from your phone. Slash commands pass through, and a typing indicator keeps the chat feeling live.
+- **WeChat Bridge** — `/wechat login` authenticates with WeChat via a QR code scan (the same iLink Bot API used by the official WeixinClawBot / `openclaw-weixin` plugin), then starts a long-poll bridge. Slash command passthrough, interactive menu routing, typing indicator, session auto-recovery, and per-peer `context_token` management all work out of the box.
 - **Worker command** — `/worker` auto-implements pending tasks from `brainstorm_outputs/todo_list.txt`, marks each one done after completion, and supports task selection by number (e.g. `1,4,6`).
 - **Force quit** — 3× Ctrl+C within 2 seconds triggers immediate `os._exit(1)`, unblocking any frozen I/O.
 - **Proactive background monitoring** — `/proactive 5m` activates a sentinel daemon that wakes the agent automatically after a period of inactivity, enabling continuous monitoring loops, scheduled checks, or trading bots without user prompts.
@@ -225,7 +236,7 @@ Claude Code is a powerful, production-grade AI coding assistant — but its sour
 | Lines of code | ~245K | ~12K |
 | Primary focus | Personal life assistant across messaging channels | AI **coding** assistant / developer tool |
 | Architecture | Always-on Gateway daemon + companion apps | Zero-install terminal REPL |
-| Messaging channels | 20+ (WhatsApp · Telegram · Slack · Discord · Signal · iMessage · Matrix · WeChat · …) | Terminal + optional Telegram bridge |
+| Messaging channels | 20+ (WhatsApp · Telegram · Slack · Discord · Signal · iMessage · Matrix · WeChat · …) | Terminal + Telegram bridge + WeChat bridge (iLink) |
 | Model providers | Multiple (cloud-first) | 7+ including full local support (Ollama · vLLM · LM Studio · …) |
 | Local / offline models | Limited | Full — Ollama, vLLM, any OpenAI-compatible endpoint |
 | Voice | Wake word · PTT · Talk Mode (macOS/iOS/Android) | Offline Whisper STT (local, no API key) |
@@ -325,6 +336,7 @@ Claude Code is a powerful, production-grade AI coding assistant — but its sour
 | SSJ Developer Mode | `/ssj` opens a persistent interactive power menu with up to 12 shortcuts: Brainstorm, TODO viewer, Worker, Expert Debate, Propose, Review, Readme, Commit, Scan, Promote, Video factory (if available), TTS factory (if available). Stays open between actions; `/command` passthrough supported. |
 | Worker | `/worker [task#s]` reads `brainstorm_outputs/todo_list.txt`, implements each pending task with a dedicated model prompt, and marks it done (`- [x]`). Supports task selection (`/worker 1,4,6`), custom path (`--path`), and worker count limit (`--workers`). Detects and redirects accidental brainstorm `.md` paths. |
 | Telegram bridge | `/telegram <token> <chat_id>` starts a bot bridge: receive messages from Telegram, run the model, and reply — all from your phone. Typing indicator, slash command passthrough (including interactive menus), and auto-start on launch if configured. |
+| WeChat bridge | `/wechat login` authenticates via QR code scan (same as WeixinClawBot / openclaw-weixin plugin), then starts the iLink long-poll bridge. `context_token` echoed per peer, typing indicator, slash command passthrough, session expiry auto-recovery. Credentials saved for auto-start on next launch. |
 | Video factory | `/video [topic]` runs the full AI video pipeline: story generation (active model) → TTS narration (Edge/Gemini/ElevenLabs) → AI images (Gemini Web free or placeholders) → subtitle burn (Whisper) → FFmpeg assembly → final `.mp4`. 10 viral content niches, landscape or short format, zero-cost path available. |
 | TTS factory | `/tts` interactive wizard: AI writes script (or paste your own) → synthesize to MP3 in any voice style (narrator, newsreader, storyteller, ASMR, motivational, documentary, children, podcast, meditation, custom). Engine auto-selects: Gemini TTS → ElevenLabs → Edge TTS (always-free). CJK text auto-switches to a matching voice. |
 | Vision input | `/image` (or `/img`) captures the clipboard image and sends it to any vision-capable model — Ollama (`llava`, `gemma4`, `llama3.2-vision`) via native format, or cloud models (GPT-4o, Gemini 2.0 Flash, …) via OpenAI `image_url` multipart format. Requires `pip install cheetahclaws[vision]`; Linux also needs `xclip`. |
@@ -858,6 +870,11 @@ Type `/` and press **Tab** to see all commands with descriptions. Continue typin
 | `/telegram` | Start the bridge using previously saved token + chat_id |
 | `/telegram stop` | Stop the Telegram bridge |
 | `/telegram status` | Show whether the bridge is running and the configured chat_id |
+| `/wechat login` | Scan QR code with WeChat to authenticate, then start the bridge |
+| `/wechat` | Start with saved credentials; triggers QR login if none saved |
+| `/wechat stop` | Stop the WeChat bridge |
+| `/wechat status` | Show running state and account info |
+| `/wechat logout` | Clear saved credentials and stop the bridge |
 | `/video [topic]` | AI video factory: story → voice → images → subtitles → `.mp4` |
 | `/video status` | Show video pipeline dependency availability |
 | `/video niches` | List all 10 viral content niches |
@@ -1980,6 +1997,90 @@ If both `telegram_token` and `telegram_chat_id` are set in `~/.cheetahclaws/conf
 
 ---
 
+## WeChat Bridge
+
+`/wechat` connects cheetahclaws to WeChat via **Tencent's iLink Bot API** — the same underlying protocol used by the official [WeixinClawBot](https://www.npmjs.com/package/@tencent-weixin/openclaw-weixin) plugin. Authenticate by scanning a QR code with your WeChat app; no manual token setup required.
+
+### Prerequisites
+
+**Enable the ClawBot plugin inside WeChat:**
+WeChat → Me → Settings → Plugins → find and enable **ClawBot** (WeixinClawBot)
+
+> This feature is being rolled out gradually by Tencent and may not yet be available on all accounts.
+
+### Setup (one-time, ~30 seconds)
+
+Run `/wechat login` in cheetahclaws. A QR code URL appears in the terminal — open it in a browser or scan it directly if you installed the `qrcode` package:
+
+```
+[myproject] ❯ /wechat login
+  ℹ Fetching WeChat QR code from iLink...
+
+  请用微信扫描以下二维码 / Scan with WeChat:
+
+  https://liteapp.weixin.qq.com/q/7GiQu1?qrcode=ccf1fb71...&bot_type=3
+
+(Install 'qrcode' for inline QR rendering: pip install qrcode)
+  等待扫码中... / Waiting for scan...
+  ✓ 微信登录成功 / WeChat authenticated (account: 3cdf6fb6d104@im.bot)
+  ✓ WeChat bridge started.
+  ℹ Send a message from WeChat — it will be processed here.
+  ℹ Stop with /wechat stop or send /stop from WeChat.
+```
+
+Scan the QR code URL with WeChat. Once confirmed, the bridge starts immediately. Credentials (`token` + `base_url`) are saved to `~/.cheetahclaws/config.json` and reused on every subsequent launch — you only need to scan once.
+
+> **Tip:** `pip install qrcode` renders the QR code directly in the terminal as ASCII art, so you can scan without opening a browser.
+
+### How it works
+
+```
+Phone (WeChat)          cheetahclaws terminal
+──────────────          ──────────────────────────────────
+"你好"          →       📩 WeChat [o9cq80_Q]: 你好
+                        [typing indicator...]
+                        ⚙ model processes query
+                ←       "你好！有什么我可以帮你的吗？..."
+```
+
+The bridge long-polls `POST /ilink/bot/getupdates` (35-second window) in a daemon thread. The server holds the connection until a message arrives or the window closes — normal timeouts are handled transparently. Every outbound reply echoes the peer's latest `context_token` as required by the iLink protocol.
+
+### Features
+
+- **QR code authentication** — scan once; credentials are saved for future launches. Expired sessions (`errcode -14`) clear saved credentials and the next `/wechat` re-triggers the QR flow automatically.
+- **Typing indicator** — sent every 4 seconds while the model processes, so the chat feels responsive.
+- **context_token echo** — per-peer `context_token` is cached in memory and echoed on every reply (iLink protocol requirement).
+- **Slash command passthrough** — send `/cost`, `/model gpt-4o`, `/clear`, etc. from WeChat and they execute in cheetahclaws. The result is sent back to the same WeChat conversation.
+- **Interactive menu routing** — commands with interactive prompts (e.g. `/permission`, `/checkpoint` restore) run in a background thread and route the prompt to WeChat; your next WeChat reply is used as the selection input.
+- **`/stop` or `/off`** sent from WeChat stops the bridge gracefully.
+- **Multi-user support** — each sender's `user_id` is tracked separately so `context_token` and input routing stay per-peer.
+- **Message deduplication** — `message_id` / `seq` dedup prevents double-processing on reconnect.
+
+### Commands
+
+| Command | Description |
+|---|---|
+| `/wechat login` | Scan QR code to authenticate and start the bridge |
+| `/wechat` | Start with saved credentials; triggers QR login if none saved |
+| `/wechat status` | Show running state and account ID |
+| `/wechat stop` | Stop the bridge |
+| `/wechat logout` | Clear saved credentials and stop the bridge |
+
+### Auto-start
+
+If `wechat_token` is set in `~/.cheetahclaws/config.json`, the bridge starts automatically on every cheetahclaws launch:
+
+```
+╭─ CheetahClaws ────────────────────────────────╮
+│  Model:       claude-opus-4-6
+│  Permissions: auto   flags: [wechat]
+│  Type /help for commands, Ctrl+C to cancel        │
+╰───────────────────────────────────────────────────╯
+✓ WeChat bridge started.
+```
+
+---
+
 ## Video Content Factory
 
 <div align=center>
@@ -2813,7 +2914,7 @@ From that point on, every `/exit` or `/quit` automatically uploads the session b
 
 ```
 cheetahclaws/
-├── cheetahclaws.py        # Entry point: REPL + slash commands + diff rendering + Rich Live streaming + proactive sentinel daemon + SSJ mode + Telegram bridge + Worker command
+├── cheetahclaws.py        # Entry point: REPL + slash commands + diff rendering + Rich Live streaming + proactive sentinel daemon + SSJ mode + Telegram bridge + WeChat bridge + Worker command
 ├── agent.py              # Agent loop: streaming, tool dispatch, compaction
 ├── providers.py          # Multi-provider: Anthropic, OpenAI-compat streaming
 ├── tools.py              # Core tools (Read/Write/Edit/Bash/Glob/Grep/Web/NotebookEdit/GetDiagnostics) + registry wiring
