@@ -73,6 +73,10 @@ English | [中文](https://github.com/SafeRL-Lab/clawspring/blob/main/docs/READM
 ## 🔥🔥🔥 News (Pacific Time)
 
 
+- Apr 11, 2026 (**v3.05.58**): **Fix `max_tokens` → `max_completion_tokens` for newer OpenAI models; add gpt-5 / o4 family**
+  - **Bug fix: `max_tokens` rejected by gpt-5-nano / o4-mini / o3** (`providers.py`) — newer OpenAI models have removed the legacy `max_tokens` parameter and require `max_completion_tokens` instead. Any request using `max_tokens` with these models was returning a 400 error and exhausting all retries. The OpenAI provider now unconditionally sends `max_completion_tokens`; all other OpenAI-compatible providers (Ollama, vLLM, Gemini, Kimi, …) continue to use `max_tokens`, which their servers expect.
+  - **New models listed** — `gpt-5`, `gpt-5-nano`, `gpt-5-mini`, `o3`, `o4-mini` added to the known OpenAI model list so they appear in `/model` suggestions and get the correct token-cap from the provider config.
+
 - Apr 10, 2026 (**v3.05.57**): **Tmux integration, shell escape (`!command`), retry mechanism, improved token estimator**
   - **Native tmux integration** (`tmux_tools.py`) — 11 tmux tools for the AI agent: `TmuxListSessions`, `TmuxNewSession`, `TmuxSplitWindow`, `TmuxSendKeys`, `TmuxCapture`, `TmuxListPanes`, `TmuxSelectPane`, `TmuxKillPane`, `TmuxNewWindow`, `TmuxListWindows`, `TmuxResizePane`. Auto-detected at startup — tools register only when `tmux` (Linux/macOS) or `psmux` (Windows) is found; zero impact if absent. The AI can now run long-lived commands in visible panes that outlive the Bash tool's timeout, read output on demand with `TmuxCapture`, and build autonomous monitoring loops. System prompt is automatically extended with tmux usage guidance when the binary is present.
   - **Shell escape** (`cheetahclaws.py`) — type `!` followed by any shell command (`!git status`, `!ls -la`, `!python --version`) to execute it directly without AI involvement. Output prints inline; control returns to the prompt immediately.
@@ -349,7 +353,14 @@ Claude Code is a powerful, production-grade AI coding assistant — but its sour
 | **Anthropic** | `claude-haiku-4-5-20251001` | 200k | Fast, cost-efficient | `ANTHROPIC_API_KEY` |
 | **OpenAI** | `gpt-4o` | 128k | Strong multimodal & coding | `OPENAI_API_KEY` |
 | **OpenAI** | `gpt-4o-mini` | 128k | Fast, cheap | `OPENAI_API_KEY` |
-| **OpenAI** | `o3-mini` | 200k | Strong reasoning | `OPENAI_API_KEY` |
+| **OpenAI** | `gpt-4.1` | 128k | Latest GPT-4 generation | `OPENAI_API_KEY` |
+| **OpenAI** | `gpt-4.1-mini` | 128k | Fast GPT-4.1 | `OPENAI_API_KEY` |
+| **OpenAI** | `gpt-5` | 128k | Next-gen flagship | `OPENAI_API_KEY` |
+| **OpenAI** | `gpt-5-nano` | 128k | Fastest GPT-5 variant | `OPENAI_API_KEY` |
+| **OpenAI** | `gpt-5-mini` | 128k | Balanced GPT-5 variant | `OPENAI_API_KEY` |
+| **OpenAI** | `o4-mini` | 200k | Fast reasoning | `OPENAI_API_KEY` |
+| **OpenAI** | `o3` | 200k | Strong reasoning | `OPENAI_API_KEY` |
+| **OpenAI** | `o3-mini` | 200k | Compact reasoning | `OPENAI_API_KEY` |
 | **OpenAI** | `o1` | 200k | Advanced reasoning | `OPENAI_API_KEY` |
 | **Google** | `gemini-2.5-pro-preview-03-25` | 1M | Long context, multimodal | `GEMINI_API_KEY` |
 | **Google** | `gemini-2.0-flash` | 1M | Fast, large context | `GEMINI_API_KEY` |
@@ -390,6 +401,8 @@ Claude Code is a powerful, production-grade AI coding assistant — but its sour
 | `llama3.2-vision` | 11B | **Vision** — multimodal reasoning | `ollama pull llama3.2-vision` |
 
 > **Note:** Tool calling requires a model that supports function calling. Recommended local models: `qwen2.5-coder`, `llama3.3`, `mistral`, `phi4`.
+
+> **OpenAI newer models (gpt-5 / o3 / o4 family):** These models require `max_completion_tokens` instead of the legacy `max_tokens` parameter. CheetahClaws handles this automatically — no configuration needed.
 
 > **Reasoning models:** `deepseek-r1`, `qwen3`, and `gemma4` stream native `<think>` blocks. Enable with `/verbose` and `/thinking` to see thoughts in the terminal. Note: models fed a large system prompt (like cheetahclaws's 25 tool schemas) may suppress their thinking phase to avoid breaking the expected JSON format — this is model behavior, not a bug.
 
