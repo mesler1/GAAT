@@ -99,16 +99,17 @@ def draw_phone(img, chat_messages):
         bubble_color = bubble_user if is_user else bubble_bot
         text_color   = (255, 255, 255) if is_user else (30, 30, 30)
 
-        # Word-wrap (handle CJK: each char ~ 1 "word")
-        chars_per_line = 22
+        # Word-wrap to ~30 chars per line
+        words = text.split()
         lines_wrapped = []
         cur = ""
-        for ch in text:
-            if len(cur) >= chars_per_line:
-                lines_wrapped.append(cur)
-                cur = ch
+        for w in words:
+            if len(cur) + len(w) + 1 > 30:
+                if cur:
+                    lines_wrapped.append(cur)
+                cur = w
             else:
-                cur += ch
+                cur = (cur + " " + w).strip()
         if cur:
             lines_wrapped.append(cur)
 
@@ -140,7 +141,7 @@ def draw_phone(img, chat_messages):
     input_y = py + ph - 44
     d.rectangle([px, input_y - 1, px + pw, input_y], fill=(210, 210, 210))
     d.rounded_rectangle([px+8, input_y+4, px+pw-50, py+ph-8], radius=16, fill=(255, 255, 255))
-    d.text((px + 22, input_y + 12), "发送消息", font=FONT_SM, fill=(160, 160, 160))
+    d.text((px + 22, input_y + 12), "Message...", font=FONT_SM, fill=(160, 160, 160))
     # Send button
     d.ellipse([px+pw-44, input_y+2, px+pw-10, py+ph-10], fill=WX_GREEN)
     d.text((px+pw-34, input_y+10), "+", font=FONT_B, fill=(255, 255, 255))
@@ -256,24 +257,24 @@ def build_scenes():
 
     # Phone shows bot ready
     phone_init = [
-        ("bot", "CheetahClaws 已就绪，请发送消息。", WX_COLOR),
+        ("bot", "CheetahClaws is ready. Send me a message!", WX_COLOR),
     ]
     add(base + [prompt_line(cursor=True)], 800, chat=phone_init)
 
-    # ── 2: First message — Chinese greeting ──────────────────────────────
-    phone_q1 = phone_init + [("user", "你好！帮我列出项目里的文件", (7, 193, 96))]
+    # ── 2: First message ─────────────────────────────────────────────────
+    phone_q1 = phone_init + [("user", "List the files in this project", (7, 193, 96))]
 
     add(base + [
         prompt_line(cursor=True),
         None,
-        wx_incoming("你好！帮我列出项目里的文件"),
+        wx_incoming("List the files in this project"),
     ], 900, chat=phone_q1)
 
     # ── 3: Typing indicator + model ──────────────────────────────────────
     wx_base = base + [
         prompt_line(cursor=False),
         None,
-        wx_incoming("你好！帮我列出项目里的文件"),
+        wx_incoming("List the files in this project"),
         None,
     ]
 
@@ -299,15 +300,15 @@ def build_scenes():
     ], 600, chat=phone_q1)
 
     resp1_lines = [
-        "你好！以下是项目中的文件：",
+        "Here are the files in this project:",
         "",
-        "  cheetahclaws.py   — 主入口 REPL + 斜杠命令",
-        "  agent.py          — 核心 Agent 循环",
-        "  tools.py          — 内置工具 (Read/Write/Edit/Bash…)",
-        "  providers.py      — API 提供商抽象层",
-        "  config.py         — 配置管理",
-        "  context.py        — 系统提示构建",
-        "  memory/           — 持久化记忆系统",
+        "  cheetahclaws.py   — Main REPL + slash commands",
+        "  agent.py          — Core agent loop",
+        "  tools.py          — Built-in tools (Read/Write/Edit/Bash…)",
+        "  providers.py      — API provider abstraction",
+        "  config.py         — Configuration management",
+        "  context.py        — System prompt builder",
+        "  memory/           — Persistent memory system",
     ]
 
     tool_done = wx_base + [
@@ -328,7 +329,7 @@ def build_scenes():
     add(tool_done + [text_line(l, 2) if l else None for l in resp1_lines] + [claude_sep()], 500, chat=phone_q1)
 
     # ── 4: Response sent ─────────────────────────────────────────────────
-    phone_r1 = phone_q1 + [("bot", "你好！项目文件：cheetahclaws.py, agent.py, tools.py, providers.py …", (30, 30, 30))]
+    phone_r1 = phone_q1 + [("bot", "Here are the files: cheetahclaws.py, agent.py, tools.py, providers.py …", (30, 30, 30))]
 
     after_r1 = wx_base + [
         [seg("  ✓ ", GREEN), seg("typing indicator sent", SUBTEXT)],
@@ -340,8 +341,8 @@ def build_scenes():
         [seg("│ ", SUBTEXT)],
     ] + [text_line(l, 2) if l else None for l in resp1_lines] + [claude_sep(), None]
 
-    add(after_r1 + [wx_sent("你好！以下是项目中的文件：…")], 900, chat=phone_r1)
-    add(after_r1 + [wx_sent("你好！以下是项目中的文件：…"), None, prompt_line(cursor=True)], 800, chat=phone_r1)
+    add(after_r1 + [wx_sent("Here are the files in this project: …")], 900, chat=phone_r1)
+    add(after_r1 + [wx_sent("Here are the files in this project: …"), None, prompt_line(cursor=True)], 800, chat=phone_r1)
 
     # ── 5: Slash command /cost from WeChat ───────────────────────────────
     phone_q2 = phone_r1 + [("user", "/cost", (7, 193, 96))]
@@ -374,12 +375,12 @@ def build_scenes():
     add(cost_base + cost_lines + [None, wx_sent("Input: 2,847 | Output: 412 | Cost: $0.0431"), None, prompt_line(cursor=True)], 800, chat=phone_cost)
 
     # ── 6: Second question — code question ───────────────────────────────
-    phone_q3 = phone_cost + [("user", "/brainstorm 是什么功能？", (7, 193, 96))]
+    phone_q3 = phone_cost + [("user", "How does /brainstorm work?", (7, 193, 96))]
 
     q3_base = after_r1 + [
         prompt_line(cursor=False),
         None,
-        wx_incoming("/brainstorm 是什么功能？"),
+        wx_incoming("How does /brainstorm work?"),
         None,
     ]
 
@@ -400,7 +401,7 @@ def build_scenes():
         tool_ok("71 lines read"),
     ], 700, chat=phone_q3)
 
-    resp3 = "/brainstorm 启动多角色 AI 辩论，生成专家视角，经多轮讨论后综合输出 Master Plan，并自动创建 todo_list.txt 待办清单。"
+    resp3 = "/brainstorm starts a multi-persona AI debate, generates expert viewpoints, synthesizes a Master Plan, and auto-creates todo_list.txt."
     resp3_parts = []
     cur = ""
     for ch in resp3:
@@ -423,7 +424,7 @@ def build_scenes():
             text_line(resp3_parts[idx], 2),
         ], 50, chat=phone_q3)
 
-    phone_r3 = phone_q3 + [("bot", "/brainstorm 启动多角色 AI 辩论，综合输出 Master Plan…", (30, 30, 30))]
+    phone_r3 = phone_q3 + [("bot", "/brainstorm runs a multi-persona AI debate and synthesizes a Master Plan…", (30, 30, 30))]
 
     add(q3_base + [
         [seg("  ✓ ", GREEN), seg("typing indicator sent", SUBTEXT)],
@@ -439,7 +440,7 @@ def build_scenes():
         text_line(resp3, 2),
         claude_sep(),
         None,
-        wx_sent("/brainstorm 启动多角色 AI 辩论…"),
+        wx_sent("/brainstorm runs a multi-persona AI debate…"),
         None,
         prompt_line(cursor=True),
     ], 1000, chat=phone_r3)
@@ -462,7 +463,7 @@ def build_scenes():
         text_line(resp3, 2),
         claude_sep(),
         None,
-        wx_sent("/brainstorm 启动多角色 AI 辩论…"),
+        wx_sent("/brainstorm runs a multi-persona AI debate…"),
         None,
         prompt_line(cursor=False),
         None,
