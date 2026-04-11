@@ -122,13 +122,7 @@ English | [中文](https://github.com/SafeRL-Lab/clawspring/blob/main/docs/READM
   - **Remote Ollama support** (`providers.py`) — the Ollama provider base URL can now be overridden via the `OLLAMA_BASE_URL` environment variable or the `ollama_base_url` config key, replacing the hardcoded `localhost:11434` default. This enables connecting to a remote Ollama instance (e.g. inside Docker or on another machine) without switching to the generic OpenAI-compatible provider.
   - **Readline resilience in containerised environments** (`cheetahclaws.py`) — `setup_readline` now catches `PermissionError` and `OSError` when loading history from a read-only or bind-mounted home directory. The `atexit` write-history callback is also wrapped in a try/except so shutdown errors are swallowed silently instead of printing noisy tracebacks.
 
-- Apr 08, 2026 (**v3.05.55**): **Modular ecosystem, TTS Content Factory, CJK voice auto-detect, readline ANSI fix**
-  - **Modular ecosystem (`modular/`)** — new plug-and-play module folder. Each submodule (`modular/video/`, `modular/voice/`) is self-contained with its own `cmd.py` exporting a `COMMAND_DEFS` dict. The registry auto-discovers all modules at startup; missing modules degrade gracefully without affecting the rest of the system. Existing `video/` and `voice/` imports continue to work via backward-compat shims.
-  - **TTS Content Factory (`/tts`)** — new command for AI-powered text-to-speech generation. Interactive wizard: choose a voice style (narrator, newsreader, storyteller, ASMR, motivational, documentary, children, podcast, meditation, custom), duration, TTS engine (Gemini → ElevenLabs → Edge, best available), and individual voice. In AI mode the active model writes the script; in custom-text mode you paste your own. Output: `.mp3` audio + `_script.txt` companion file. Also accessible as option 12 in `/ssj`.
-  - **CJK auto-voice detection** — Edge TTS with an English voice silently skips Chinese/Japanese/Korean characters (only reads the Latin parts). The TTS backend now detects CJK-heavy text and auto-switches to `zh-CN-XiaoxiaoNeural` when a non-CJK voice is selected, ensuring the full text is synthesized.
-  - **Edge TTS long-text chunking** — Edge TTS silently truncates text beyond ~3 000 chars. The pipeline now splits text into ≤ 2 000-char chunks at sentence boundaries, synthesizes each chunk independently, and concatenates with ffmpeg — audio now always covers the complete script.
-  - **Readline ANSI fix** (#29 / #31) — ANSI color codes in `input()` prompts now wrapped with `\001…\002` (RL_PROMPT_START/END_IGNORE) so readline accounts for them as zero-width. Fixes cursor drift and duplicate-line content when scrolling REPL history.
-  - **SSJ Developer Mode extended** — SSJ menu now includes option 11 (🎬 Video factory, conditional) and option 12 (🎙 TTS factory, conditional), matching the modular availability flags.
+
 
 
  
