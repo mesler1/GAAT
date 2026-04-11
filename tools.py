@@ -1273,3 +1273,10 @@ register_tool(ToolDef(
     read_only=False,
     concurrent_safe=False,
 ))
+
+# ── Tmux tools (auto-detected: only registered when tmux is on the system) ───
+try:
+    from tmux_tools import register_tmux_tools
+    _tmux_count = register_tmux_tools()
+except ImportError:
+    _tmux_count = 0

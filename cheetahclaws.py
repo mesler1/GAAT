@@ -3784,6 +3784,18 @@ def repl(config: dict, initial_prompt: str = None):
         if not user_input:
             continue
 
+        # ── Shell escape: !command runs directly in the system shell ──
+        if user_input.startswith("!"):
+            shell_cmd = user_input[1:].strip()
+            if shell_cmd:
+                print(clr(f"  $ {shell_cmd}", "dim"))
+                try:
+                    import subprocess as _sp
+                    _sp.run(shell_cmd, shell=True)
+                except Exception as e:
+                    warn(f"Shell error: {e}")
+            continue
+
         result = handle_slash(user_input, state, config)
         # ── Sentinel processing loop ──
         # Processes sentinel tuples returned by commands. SSJ-originated
