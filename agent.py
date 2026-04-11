@@ -257,6 +257,8 @@ def _force_compact(state: AgentState, config: dict) -> bool:
     if estimate_tokens(state.messages) < limit * 0.9:
         return True
     state.messages = compact_messages(state.messages, config)
+    from compaction import _restore_plan_context
+    state.messages.extend(_restore_plan_context(config))
     after = estimate_tokens(state.messages)
     return after < before
 

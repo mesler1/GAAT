@@ -3539,23 +3539,6 @@ def repl(config: dict, initial_prompt: str = None):
                                 state.messages.pop()
                             return run_query(user_input, is_background)
                         return
-                # Context too long — force compact and retry
-                err_str = str(e).lower()
-                is_context_err = any(s in err_str for s in [
-                    "context_length", "context window", "too many tokens",
-                    "input is too long", "prompt is too long", "token limit",
-                ])
-                if is_context_err:
-                    warn("Context too long — forcing compaction and retrying...")
-                    from compaction import estimate_tokens, get_context_limit
-                    from agent import _force_compact
-                    _force_compact(state, config)
-                    after = estimate_tokens(state.messages)
-                    limit = get_context_limit(config.get("model", ""))
-                    if after < limit * 0.9:
-                        return run_query(user_input, is_background)
-                    err(f"Context still too large after compaction ({after} / {limit} tokens). Try /compact or start a new session.")
-                    return
                 # Any other uncaught error — never crash, just report and let user retry
                 err(f"Error: {type(e).__name__}: {_truncate_err_global(str(e))}")
                 warn("Your conversation is intact. You can retry or type a new message.")
