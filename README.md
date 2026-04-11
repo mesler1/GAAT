@@ -73,6 +73,10 @@ English | [中文](https://github.com/SafeRL-Lab/clawspring/blob/main/docs/READM
 ## 🔥🔥🔥 News (Pacific Time)
 
 
+- Apr 10, 2026 (**v3.05.57**): **Tmux integration, shell escape (`!command`), retry mechanism, improved token estimator**
+  - **Native tmux integration** (`tmux_tools.py`) — 11 tmux tools for the AI agent: `TmuxListSessions`, `TmuxNewSession`, `TmuxSplitWindow`, `TmuxSendKeys`, `TmuxCapture`, `TmuxListPanes`, `TmuxSelectPane`, `TmuxKillPane`, `TmuxNewWindow`, `TmuxListWindows`, `TmuxResizePane`. Auto-detected at startup — tools register only when `tmux` (Linux/macOS) or `psmux` (Windows) is found; zero impact if absent. The AI can now run long-lived commands in visible panes that outlive the Bash tool's timeout, read output on demand with `TmuxCapture`, and build autonomous monitoring loops. System prompt is automatically extended with tmux usage guidance when the binary is present.
+  - **Shell escape** (`cheetahclaws.py`) — type `!` followed by any shell command (`!git status`, `!ls -la`, `!python --version`) to execute it directly without AI involvement. Output prints inline; control returns to the prompt immediately.
+
 - Apr 10, 2026 (**v3.05.56**): **Retry mechanism, improved token estimator, plan-context fix after force compaction**
   - **Retry with exponential backoff** (`agent.py`) — the provider stream loop now retries up to 3 times on any API error instead of crashing the session. Context-too-long errors trigger an immediate force compaction and retry; overloaded/rate-limit errors use longer backoff (4 s, 8 s, 16 s); all other errors use standard backoff (2 s, 4 s, 8 s). After exhausting retries a graceful inline message is shown — the session is never killed.
   - **Improved token estimator** (`compaction.py`) — `estimate_tokens` now uses `chars / 2.8` (was `chars / 3.5`) to better account for code-heavy content, adds 4 tokens per message for framing overhead, and applies a 10 % safety buffer. The old divisor underestimated real token counts, causing compaction to skip when it should have triggered and leading to context-overflow crashes.
@@ -141,6 +145,8 @@ CheetahClaws: **A Lightweight** and **Easy-to-Use** Python Reimplementation of C
   * [Telegram Bridge](#telegram-bridge)
   * [Video Content Factory](#video-content-factory)
   * [TTS Content Factory](#tts-content-factory)
+  * [Tmux Integration](#tmux-integration)
+  * [Shell Escape](#shell-escape)
   * [Proactive Background Monitoring](#proactive-background-monitoring)
   * [Checkpoint System](#checkpoint-system)
   * [Plan Mode](#plan-mode)
@@ -329,6 +335,8 @@ Claude Code is a powerful, production-grade AI coding assistant — but its sour
 | Video factory | `/video [topic]` runs the full AI video pipeline: story generation (active model) → TTS narration (Edge/Gemini/ElevenLabs) → AI images (Gemini Web free or placeholders) → subtitle burn (Whisper) → FFmpeg assembly → final `.mp4`. 10 viral content niches, landscape or short format, zero-cost path available. |
 | TTS factory | `/tts` interactive wizard: AI writes script (or paste your own) → synthesize to MP3 in any voice style (narrator, newsreader, storyteller, ASMR, motivational, documentary, children, podcast, meditation, custom). Engine auto-selects: Gemini TTS → ElevenLabs → Edge TTS (always-free). CJK text auto-switches to a matching voice. |
 | Vision input | `/image` (or `/img`) captures the clipboard image and sends it to any vision-capable model — Ollama (`llava`, `gemma4`, `llama3.2-vision`) via native format, or cloud models (GPT-4o, Gemini 2.0 Flash, …) via OpenAI `image_url` multipart format. Requires `pip install cheetahclaws[vision]`; Linux also needs `xclip`. |
+| Tmux integration | 11 tmux tools for direct terminal control: create sessions/windows/panes, send commands, capture output. Auto-detected; zero impact if tmux is absent. Enables long-running tasks that outlive Bash tool timeouts. Cross-platform (tmux on Unix, psmux on Windows). |
+| Shell escape | Type `!command` in the REPL to execute any shell command directly without AI involvement (`!git status`, `!ls`, `!python --version`). Output prints inline. |
 | Proactive monitoring | `/proactive [duration]` starts a background sentinel daemon; agent wakes automatically after inactivity, enabling continuous monitoring loops without user prompts |
 | Force quit | 3× Ctrl+C within 2 seconds triggers `os._exit(1)` — kills the process immediately regardless of blocking I/O |
 | Rich Live streaming | When `rich` is installed, responses render as live-updating Markdown in place. Auto-disabled in SSH sessions to prevent repeated output; override with `/config rich_live=false`. |
@@ -678,8 +686,8 @@ CUDA_VISIBLE_DEVICES=7 python -m vllm.entrypoints.openai.api_server \
 python -m vllm.entrypoints.openai.api_server \
     --model Qwen/Qwen2.5-Coder-32B-Instruct \
     --port 8000 \
-    --enable-auto-tool-choice \                                                                                                                                                   
-    --tool-call-parser hermes 
+    --enable-auto-tool-choice \
+    --tool-call-parser hermes
 
 # Then run cheetahclaws pointing to your server:
 cheetahclaws
@@ -2206,6 +2214,92 @@ Check status: `/tts status`
 ### Also in SSJ mode
 
 `/tts` is available as option **12** in the SSJ Developer Mode menu, so you can chain it with brainstorm, worker, and video workflows in a single session.
+
+---
+
+## Tmux Integration
+
+CheetahClaws gives the AI model **direct control over tmux** — create sessions, split panes, send commands, and capture output. This is auto-detected at startup: tmux tools are only registered when a compatible binary (`tmux` on Linux/macOS, `psmux` on Windows) is found in PATH. If tmux is not installed, everything else works as normal.
+
+### Why tmux tools
+
+The `Bash` tool has a hard timeout (~30–120 s). Long-running tasks — training runs, servers, package builds, log monitors — get killed before they finish. With tmux tools, the AI sends the command to a **visible pane** that outlives any timeout, then uses `TmuxCapture` to read the output and react.
+
+### Tools
+
+| Tool | What it does |
+|---|---|
+| `TmuxListSessions` | List all active sessions |
+| `TmuxNewSession` | Create a new session (use `detached=true` for background) |
+| `TmuxNewWindow` | Add a visible tab inside an existing session |
+| `TmuxSplitWindow` | Split the current pane vertically or horizontally |
+| `TmuxSendKeys` | Send a command/keystrokes to any pane |
+| `TmuxCapture` | Read visible text output from a pane |
+| `TmuxListPanes` | List panes with index, size, and active status |
+| `TmuxSelectPane` | Switch focus to a specific pane |
+| `TmuxKillPane` | Close a pane |
+| `TmuxListWindows` | List windows in a session |
+| `TmuxResizePane` | Resize a pane (up/down/left/right) |
+
+### Quick start
+
+**Run a training script in a visible window:**
+```
+[cheetahclaws] » Open a new tmux window and run python train.py so I can watch the output
+```
+The AI will call `TmuxNewWindow` → `TmuxSendKeys("python train.py")`. A new tab opens immediately and you watch the output live.
+
+**Check training progress:**
+```
+[cheetahclaws] » Check what the training window is printing now — has the loss gone down?
+```
+The AI calls `TmuxListPanes` to locate the pane, then `TmuxCapture` to read the last 50 lines and summarise.
+
+**Split screen: server on the left, tests on the right:**
+```
+[cheetahclaws] » Run uvicorn main:app on the left and pytest on the right, split screen
+```
+The AI calls `TmuxSplitWindow(direction=horizontal)`, then `TmuxSendKeys` to each pane.
+
+**Launch vLLM in a detached background session:**
+```
+[cheetahclaws] » Start a background tmux session running vLLM, don't take over this terminal
+```
+The AI calls `TmuxNewSession(detached=true)` then sends the vLLM launch command to that session.
+
+### Bash tool vs Tmux tools
+
+| | Bash tool | Tmux tools |
+|---|---|---|
+| Best for | Quick commands (`ls`, `git`, `pip install`) | Long-running tasks, servers, builds, monitors |
+| Timeout | ~30–120 s, then killed | Never — runs in its own pane |
+| Output | Returned directly to AI | Read on demand via `TmuxCapture` |
+| Visibility | Hidden (background) | Visible to user in a real terminal pane |
+
+**Rule of thumb:** use the Bash tool by default. Switch to tmux only when the command would timeout or you want the user to see it running.
+
+---
+
+## Shell Escape
+
+Type `!` followed by any shell command to execute it directly without the AI intercepting:
+
+```
+[cheetahclaws] » !git status
+  $ git status
+On branch main
+...
+
+[cheetahclaws] » !ls -la
+  $ ls -la
+...
+
+[cheetahclaws] » !python --version
+  $ python --version
+Python 3.11.7
+```
+
+Output prints inline and control returns to the CheetahClaws prompt immediately. Any valid shell expression works, including pipes: `!cat log.txt | tail -20`.
 
 ---
 
