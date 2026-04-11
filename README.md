@@ -883,6 +883,13 @@ Type `/` and press **Tab** to see all commands with descriptions. Continue typin
 
 **Switching models inside a session:**
 
+<div align=center>
+<img src="https://github.com/SafeRL-Lab/cheetahclaws/blob/main/docs/multimodel_demo.gif" width="850"/>
+</div>
+<div align=center>
+<center style="color:#000000;text-decoration:underline">Multi-Model Switching: Claude → GPT-4o → Ollama → back, full history preserved</center>
+</div>
+
 ```
 [myproject] ❯ /model
   Current model: claude-opus-4-6  (provider: anthropic)
@@ -1045,6 +1052,13 @@ MCP tools are discovered automatically from configured servers and registered un
 ---
 
 ## Memory
+
+<div align=center>
+<img src="https://github.com/SafeRL-Lab/cheetahclaws/blob/main/docs/memory_demo.gif" width="850"/>
+</div>
+<div align=center>
+<center style="color:#000000;text-decoration:underline">Memory: save preferences in session 1 → auto-recalled in session 2, no re-explanation needed</center>
+</div>
 
 The model can remember things across conversations using the built-in memory system.
 
@@ -1226,6 +1240,13 @@ AI: [deploys version 2.1.0 to staging]
 ---
 
 ## Sub-Agents
+
+<div align=center>
+<img src="https://github.com/SafeRL-Lab/cheetahclaws/blob/main/docs/subagent_demo.gif" width="850"/>
+</div>
+<div align=center>
+<center style="color:#000000;text-decoration:underline">Sub-Agents: spawn coder + security agents in parallel, merge results automatically</center>
+</div>
 
 The model can spawn independent sub-agents to handle tasks in parallel.
 
@@ -1530,6 +1551,13 @@ Claude:
 
 ## Voice Input
 
+<div align=center>
+<img src="https://github.com/SafeRL-Lab/cheetahclaws/blob/main/docs/voice_demo.gif" width="850"/>
+</div>
+<div align=center>
+<center style="color:#000000;text-decoration:underline">Voice Input: speak your prompt → offline Whisper transcription → AI responds</center>
+</div>
+
 CheetahClaws v3.05 adds a fully offline voice-to-prompt pipeline. Speak your request — it is transcribed and submitted as if you had typed it.
 
 ### Quick start
@@ -1763,6 +1791,13 @@ Any `/command` typed at the `⚡ SSJ »` prompt is passed through to the REPL:
 
 ### Worker command
 
+<div align=center>
+<img src="https://github.com/SafeRL-Lab/cheetahclaws/blob/main/docs/worker_demo.gif" width="850"/>
+</div>
+<div align=center>
+<center style="color:#000000;text-decoration:underline">/worker: brainstorm → 5-task queue → auto-implement each with progress bar</center>
+</div>
+
 `/worker` (also accessible as SSJ option 3) reads `brainstorm_outputs/todo_list.txt` and auto-implements each pending task:
 
 ```
@@ -1945,6 +1980,13 @@ If both `telegram_token` and `telegram_chat_id` are set in `~/.cheetahclaws/conf
 
 ## Video Content Factory
 
+<div align=center>
+<img src="https://github.com/SafeRL-Lab/cheetahclaws/blob/main/docs/video_demo.gif" width="850"/>
+</div>
+<div align=center>
+<center style="color:#000000;text-decoration:underline">Video Factory: topic → AI story → TTS → images → subtitles → final .mp4</center>
+</div>
+
 `/video` is an AI-powered viral video pipeline. Give it a topic — or your own script — and it produces a fully narrated, illustrated, subtitle-burned `.mp4` ready to upload.
 
 ```
@@ -2036,7 +2078,14 @@ Subtitles are rendered with **Pillow + NotoSansSC font** — not libass. This me
 | Custom text | Paste your own text | Translations, alternate language |
 | None | Skip subtitles | Music videos, no-sub content |
 
-### Image backends
+### Image backends (vision input)
+
+<div align=center>
+<img src="https://github.com/SafeRL-Lab/cheetahclaws/blob/main/docs/image_demo.gif" width="850"/>
+</div>
+<div align=center>
+<center style="color:#000000;text-decoration:underline">/image: paste UI screenshot → AI flags issues; paste code screenshot → AI spots bugs</center>
+</div>
 
 | Engine | How | Cost | Quality |
 |---|---|---|---|
@@ -2131,6 +2180,13 @@ video_tmp/batch_20260407_153000/story/
 
 ## TTS Content Factory
 
+<div align=center>
+<img src="https://github.com/SafeRL-Lab/cheetahclaws/blob/main/docs/voice_demo.gif" width="850"/>
+</div>
+<div align=center>
+<center style="color:#000000;text-decoration:underline">TTS Factory: choose voice style → AI writes script → synthesize → .mp3 output</center>
+</div>
+
 `/tts` is an AI-powered audio generation wizard. Give it a topic — or paste your own script — and it produces a narrated MP3 in any voice style.
 
 ### Quick start
@@ -2219,6 +2275,13 @@ Check status: `/tts status`
 
 ## Tmux Integration
 
+<div align=center>
+<img src="https://github.com/SafeRL-Lab/cheetahclaws/blob/main/docs/tmux_demo.gif" width="850"/>
+</div>
+<div align=center>
+<center style="color:#000000;text-decoration:underline">Tmux Integration: AI splits panes, sends commands, captures output across sessions</center>
+</div>
+
 CheetahClaws gives the AI model **direct control over tmux** — create sessions, split panes, send commands, and capture output. This is auto-detected at startup: tmux tools are only registered when a compatible binary (`tmux` on Linux/macOS, `psmux` on Windows) is found in PATH. If tmux is not installed, everything else works as normal.
 
 ### Why tmux tools
@@ -2281,6 +2344,13 @@ The AI calls `TmuxNewSession(detached=true)` then sends the vLLM launch command 
 ---
 
 ## Shell Escape
+
+<div align=center>
+<img src="https://github.com/SafeRL-Lab/cheetahclaws/blob/main/docs/shell_escape_demo.gif" width="850"/>
+</div>
+<div align=center>
+<center style="color:#000000;text-decoration:underline">Shell Escape: ! prefix runs commands directly — git, ls, python, pipes — no AI involvement</center>
+</div>
 
 Type `!` followed by any shell command to execute it directly without the AI intercepting:
 
@@ -2357,6 +2427,13 @@ Duration suffix: `s` = seconds, `m` = minutes, `h` = hours. Plain integer = seco
 
 ## Checkpoint System
 
+<div align=center>
+<img src="https://github.com/SafeRL-Lab/cheetahclaws/blob/main/docs/checkpoint_demo.gif" width="850"/>
+</div>
+<div align=center>
+<center style="color:#000000;text-decoration:underline">Checkpoint / Rewind: AI breaks tests → /checkpoint list → rewind → files restored</center>
+</div>
+
 CheetahClaws automatically snapshots your conversation and any edited files after every turn, so you can always rewind to an earlier state.
 
 ### How it works
@@ -2395,6 +2472,13 @@ CheetahClaws automatically snapshots your conversation and any edited files afte
 ---
 
 ## Plan Mode
+
+<div align=center>
+<img src="https://github.com/SafeRL-Lab/cheetahclaws/blob/main/docs/plan_demo.gif" width="850"/>
+</div>
+<div align=center>
+<center style="color:#000000;text-decoration:underline">Plan Mode: Read-only analysis → write plan → /plan done → implement</center>
+</div>
 
 Plan mode is a structured workflow for tackling complex, multi-file tasks: Claude first analyses the codebase in a read-only phase and writes an explicit plan, then the user approves before implementation begins.
 
@@ -2653,6 +2737,13 @@ Resume a specific file:
 ---
 
 ## Cloud Sync (GitHub Gist)
+
+<div align=center>
+<img src="https://github.com/SafeRL-Lab/cheetahclaws/blob/main/docs/cloudsave_demo.gif" width="850"/>
+</div>
+<div align=center>
+<center style="color:#000000;text-decoration:underline">Cloud Sync: /cloudsave on desktop → encrypted upload → /cloudload on laptop → full session restored</center>
+</div>
 
 CheetahClaws v3.05.3 adds optional cloud backup of conversation sessions via **GitHub Gist**. Sessions are stored as private Gists (JSON), browsable in the GitHub UI. No extra dependencies — uses Python's stdlib `urllib`.
 

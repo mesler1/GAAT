@@ -11,7 +11,6 @@
   - **Bash timeout hints** — the `Bash` tool description now advises the model to use `timeout=120–300` for slow commands (`npm install`, `npx`, `pip install`, builds), reducing spurious 30-second timeouts on package operations.
   - **Bug fix: background event prompt shows actual cwd** — the yellow re-prompt printed after a background event completed was hardcoded to `[claude-code-local]`; it now shows the real working-directory name (`[{cwd.name}]`), consistent with the main REPL prompt.
 
-
 - Apr 06, 2026 (**v3.05.53**): **Telegram interactive menus, `/img` alias, `/voice device`, OpenAI/Gemini vision support**
   - **Telegram interactive menus fixed** — slash commands with interactive input (e.g. `/ollama`, `/permission`, `/checkpoint`) were blocking the Telegram poll loop, making it impossible to respond to the menu prompts. Slash commands now run in a daemon thread (like regular queries), keeping the poll loop free. All interactive menus (`ask_input_interactive`) work correctly over Telegram.
   - **`/img` alias** — `/img` is now an alias for `/image`, for faster clipboard-image workflows.
