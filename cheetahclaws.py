@@ -61,11 +61,13 @@ Slash commands in REPL:
   /telegram stop|status             Stop or check Telegram bridge
   /wechat <ilink_token>             Start WeChat bridge (iLink Bot API)
   /wechat stop|status               Stop or check WeChat bridge
+  /slack <token> <channel_id>       Start Slack bridge (Web API)
+  /slack stop|status|logout         Stop, check, or clear Slack bridge
   /exit /quit Exit
 """
 from __future__ import annotations
 
-from tools import ask_input_interactive, _tg_thread_local, _is_in_tg_turn, _wx_thread_local, _is_in_wx_turn
+from tools import ask_input_interactive, _tg_thread_local, _is_in_tg_turn, _wx_thread_local, _is_in_wx_turn, _slack_thread_local, _is_in_slack_turn
 
 import os
 import re
@@ -3000,6 +3002,384 @@ def cmd_wechat(args: str, _state, config) -> bool:
     return True
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# ── Slack Bridge ─────────────────────────────────────────────────────────────
+# Uses Slack Web API (urllib only — no external packages required).
+# Setup:
+#   1. Create a Slack App at https://api.slack.com/apps
+#   2. Add Bot Token Scopes: channels:history, chat:write, groups:history,
+#      im:history, mpim:history, channels:read
+#   3. Install app to workspace → copy Bot User OAuth Token (xoxb-...)
+#   4. Invite the bot to the target channel: /invite @<bot_name>
+#   5. Run /slack <token> <channel_id>
+# ════════════════════════════════════════════════════════════════════════════
+
+_slack_thread: threading.Thread | None = None
+_slack_stop   = threading.Event()
+
+_SLACK_API_BASE    = "https://slack.com/api"
+_SLACK_POLL_INTERVAL = 2      # seconds between history polls
+_SLACK_API_TIMEOUT   = 15     # seconds for regular API calls
+_SLACK_MAX_SEEN      = 2000   # cap on dedup set size
+_slack_seen_ts: set[str] = set()
+
+
+def _slack_api(token: str, method: str, params: dict | None = None, *,
+               timeout: int = _SLACK_API_TIMEOUT) -> dict | None:
+    """Call a Slack Web API method (GET with query params)."""
+    import urllib.request, urllib.parse
+    url = f"{_SLACK_API_BASE}/{method}"
+    if params:
+        url += "?" + urllib.parse.urlencode(params)
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read())
+    except Exception:
+        return None
+
+
+def _slack_post(token: str, method: str, payload: dict, *,
+                timeout: int = _SLACK_API_TIMEOUT) -> dict | None:
+    """Call a Slack Web API method (POST with JSON body)."""
+    import urllib.request
+    url = f"{_SLACK_API_BASE}/{method}"
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=body,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json; charset=utf-8",
+        }
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read())
+    except Exception:
+        return None
+
+
+def _slack_send(token: str, channel: str, text: str) -> None:
+    """Send a plain-text message to a Slack channel."""
+    _slack_post(token, "chat.postMessage", {"channel": channel, "text": text})
+
+
+def _slack_poll_loop(token: str, channel: str, config: dict) -> None:
+    """Poll conversations.history for new messages and feed them to run_query."""
+    run_query_cb = config.get("_run_query_callback")
+
+    # Register send callback so ask_input_interactive can route to Slack
+    config["_slack_send_callback"] = lambda ch, txt: _slack_send(token, ch, txt)
+
+    # Post online notification
+    _slack_send(token, channel, "🟢 cheetahclaws is online. Send me a message and I'll process it.")
+
+    # Seed oldest with current time so we skip pre-existing messages
+    import time as _time
+    oldest = str(_time.time())
+    consecutive_failures = 0
+
+    while not _slack_stop.is_set():
+        _slack_stop.wait(_SLACK_POLL_INTERVAL)
+        if _slack_stop.is_set():
+            break
+
+        try:
+            result = _slack_api(token, "conversations.history", {
+                "channel": channel,
+                "oldest": oldest,
+                "limit": 20,
+            })
+
+            if result is None:
+                consecutive_failures += 1
+                if consecutive_failures >= 5:
+                    print(clr("\n  ⚠ Slack: repeated connection failures, retrying in 30s...", "yellow"))
+                    _slack_stop.wait(30)
+                    consecutive_failures = 0
+                continue
+            consecutive_failures = 0
+
+            if not result.get("ok"):
+                err = result.get("error", "unknown")
+                if err in ("invalid_auth", "token_revoked", "account_inactive"):
+                    print(clr(f"\n  ⚠ Slack: auth error ({err}) — use /slack logout and reconnect", "yellow"))
+                    break
+                print(clr(f"\n  ⚠ Slack: API error {err}, retrying...", "yellow"))
+                _slack_stop.wait(5)
+                continue
+
+            messages = result.get("messages") or []
+            # conversations.history returns newest-first; reverse to process oldest first
+            messages = list(reversed(messages))
+
+            for msg in messages:
+                ts = msg.get("ts", "")
+                if not ts:
+                    continue
+
+                # Advance oldest cursor
+                if ts > oldest:
+                    oldest = ts
+
+                # Dedup
+                if ts in _slack_seen_ts:
+                    continue
+                _slack_seen_ts.add(ts)
+                if len(_slack_seen_ts) > _SLACK_MAX_SEEN:
+                    oldest_keys = sorted(_slack_seen_ts)[:500]
+                    for k in oldest_keys:
+                        _slack_seen_ts.discard(k)
+
+                # Skip bot's own messages and sub-type messages (joins, etc.)
+                if msg.get("bot_id") or msg.get("subtype"):
+                    continue
+
+                text = (msg.get("text") or "").strip()
+                if not text:
+                    continue
+
+                # Show on local terminal
+                user_id = msg.get("user", "unknown")
+                print(clr(f"\n  📩 Slack [{user_id[:8]}]: {text}", "cyan"))
+
+                # Intercept if a permission prompt is waiting
+                evt = config.get("_slack_input_event")
+                if evt:
+                    config["_slack_input_value"] = text
+                    evt.set()
+                    continue
+
+                # /stop or /off from Slack
+                if text.strip().lower() in ("/stop", "/off"):
+                    _slack_send(token, channel, "🔴 cheetahclaws bridge stopped.")
+                    _slack_stop.set()
+                    break
+
+                if text.strip().lower() == "/start":
+                    _slack_send(token, channel, "🟢 cheetahclaws bridge is active. Send me anything.")
+                    continue
+
+                # Slash command passthrough
+                if text.strip().startswith("/"):
+                    slash_cb = config.get("_handle_slash_callback")
+                    if slash_cb:
+                        def _slack_slash_runner(_slash_text, _ch):
+                            _slack_thread_local.active = True
+                            config["_slack_current_channel"] = _ch
+                            try:
+                                cmd_type = slash_cb(_slash_text)
+                            except Exception as e:
+                                _slack_send(token, _ch, f"⚠ Error: {e}")
+                                return
+                            finally:
+                                _slack_thread_local.active = False
+                                config.pop("_slack_current_channel", None)
+                            if cmd_type == "simple":
+                                cmd_name = _slash_text.strip().split()[0]
+                                _slack_send(token, _ch, f"✅ {cmd_name} executed.")
+                                return
+                            slack_state = config.get("_state")
+                            if slack_state and slack_state.messages:
+                                for m in reversed(slack_state.messages):
+                                    if m.get("role") == "assistant":
+                                        content = m.get("content", "")
+                                        if isinstance(content, list):
+                                            parts = [
+                                                b.get("text", "") if isinstance(b, dict) and b.get("type") == "text"
+                                                else (b if isinstance(b, str) else "")
+                                                for b in content
+                                            ]
+                                            content = "\n".join(p for p in parts if p)
+                                        if content:
+                                            _slack_send(token, _ch, content)
+                                        break
+                        threading.Thread(
+                            target=_slack_slash_runner, args=(text, channel), daemon=True
+                        ).start()
+                    continue
+
+                # Run the query in a background thread
+                def _slack_bg_runner(q_text, ch):
+                    # Post a "thinking" placeholder
+                    think_resp = _slack_post(token, "chat.postMessage", {
+                        "channel": ch, "text": "⏳ Thinking…"
+                    })
+                    think_ts = (think_resp or {}).get("ts") if think_resp and think_resp.get("ok") else None
+
+                    config["_slack_current_channel"] = ch
+                    config["_in_slack_turn"] = True
+                    try:
+                        if run_query_cb:
+                            run_query_cb(q_text)
+                    except Exception as e:
+                        _slack_send(token, ch, f"⚠ Error: {e}")
+                        return
+                    finally:
+                        config.pop("_in_slack_turn", None)
+                        config.pop("_slack_current_channel", None)
+
+                    # Grab last assistant response
+                    reply = ""
+                    state = config.get("_state")
+                    if state and state.messages:
+                        for m in reversed(state.messages):
+                            if m.get("role") == "assistant":
+                                content = m.get("content", "")
+                                if isinstance(content, list):
+                                    parts = [
+                                        b.get("text", "") if isinstance(b, dict) and b.get("type") == "text"
+                                        else (b if isinstance(b, str) else "")
+                                        for b in content
+                                    ]
+                                    content = "\n".join(p for p in parts if p)
+                                reply = content
+                                break
+
+                    if reply:
+                        # Update the placeholder with the real response
+                        if think_ts:
+                            upd = _slack_post(token, "chat.update", {
+                                "channel": ch, "ts": think_ts, "text": reply
+                            })
+                            if not (upd and upd.get("ok")):
+                                _slack_send(token, ch, reply)
+                        else:
+                            _slack_send(token, ch, reply)
+                        print(clr(f"  ✈  Slack response sent → {reply[:60]}…", "cyan"))
+
+                threading.Thread(target=_slack_bg_runner, args=(text, channel), daemon=True).start()
+
+        except Exception:
+            _slack_stop.wait(5)
+
+    global _slack_thread
+    _slack_thread = None
+    config.pop("_slack_send_callback", None)
+
+
+def _slack_start_bridge(_state, config) -> None:
+    """Start the Slack polling thread (assumes token + channel already in config)."""
+    global _slack_thread, _slack_stop
+    token   = config.get("slack_token", "")
+    channel = config.get("slack_channel", "")
+    config["_state"] = _state
+    _slack_stop = threading.Event()
+    _slack_thread = threading.Thread(
+        target=_slack_poll_loop, args=(token, channel, config), daemon=True
+    )
+    _slack_thread.start()
+    ok("Slack bridge started.")
+    info("Send a message in the configured Slack channel — it will be processed here.")
+    info("Stop with /slack stop or send /stop in Slack.")
+
+
+def cmd_slack(args: str, _state, config) -> bool:
+    """Slack bot bridge — receive and respond to messages via Slack Web API.
+
+    Setup (one-time):
+      1. Create a Slack App at https://api.slack.com/apps
+      2. OAuth & Permissions → add Bot Token Scopes:
+           channels:history  chat:write  groups:history  im:history
+           mpim:history  channels:read
+      3. Install to workspace → copy "Bot User OAuth Token" (xoxb-...)
+      4. Invite your bot to the channel: /invite @<bot_name>
+
+    Usage:
+      /slack <token> <channel_id>  — configure and start bridge
+      /slack                       — start with saved credentials
+      /slack stop                  — stop the bridge
+      /slack status                — show current status
+      /slack logout                — clear saved credentials
+
+    Credentials are saved so subsequent launches re-use them automatically.
+    """
+    global _slack_thread, _slack_stop
+    from config import save_config
+
+    parts = args.strip().split()
+
+    # ── /slack stop ──
+    if parts and parts[0].lower() in ("stop", "off"):
+        if _slack_thread and _slack_thread.is_alive():
+            _slack_stop.set()
+            _slack_thread.join(timeout=5)
+            _slack_thread = None
+            ok("Slack bridge stopped.")
+        else:
+            warn("Slack bridge is not running.")
+        return True
+
+    # ── /slack status ──
+    if parts and parts[0].lower() == "status":
+        running = _slack_thread and _slack_thread.is_alive()
+        token   = config.get("slack_token", "")
+        channel = config.get("slack_channel", "")
+        if running:
+            ok(f"Slack bridge running  (channel: {channel})")
+        elif token:
+            info("Configured but not running. Use /slack to start.")
+        else:
+            info("Not configured. Use: /slack <token> <channel_id>")
+        return True
+
+    # ── /slack logout ──
+    if parts and parts[0].lower() == "logout":
+        if _slack_thread and _slack_thread.is_alive():
+            _slack_stop.set()
+            _slack_thread.join(timeout=5)
+            _slack_thread = None
+        config.pop("slack_token", None)
+        config.pop("slack_channel", None)
+        save_config(config)
+        ok("Slack credentials cleared.")
+        return True
+
+    # ── /slack <token> <channel_id> — configure and start ──
+    if len(parts) >= 2 and parts[0].startswith("xoxb-"):
+        token, channel = parts[0], parts[1]
+        if _slack_thread and _slack_thread.is_alive():
+            _slack_stop.set()
+            _slack_thread.join(timeout=5)
+            _slack_thread = None
+        config["slack_token"]   = token
+        config["slack_channel"] = channel
+        save_config(config)
+        info(f"Slack credentials saved (channel: {channel}).")
+        _slack_start_bridge(_state, config)
+        return True
+
+    # ── /slack (no args) — start with saved creds ──
+    if _slack_thread and _slack_thread.is_alive():
+        warn("Slack bridge is already running. Use /slack stop first.")
+        return True
+
+    token   = config.get("slack_token", "")
+    channel = config.get("slack_channel", "")
+    if not token or not channel:
+        warn("No saved credentials. Usage: /slack <xoxb-token> <channel_id>")
+        info("Get your token at https://api.slack.com/apps → OAuth & Permissions")
+        return True
+
+    # Quick auth test
+    me = _slack_api(token, "auth.test")
+    if me is None or not me.get("ok"):
+        err = (me or {}).get("error", "connection failed")
+        if err in ("invalid_auth", "token_revoked"):
+            warn(f"Slack token invalid ({err}). Clear with /slack logout.")
+            config.pop("slack_token", None)
+            config.pop("slack_channel", None)
+            save_config(config)
+        else:
+            warn(f"Slack auth check failed: {err}. Retrying at next poll.")
+        return True
+
+    bot_name = me.get("user", "bot")
+    info(f"Slack authenticated as @{bot_name}")
+    _slack_start_bridge(_state, config)
+    return True
+
+
 # ── Voice command (loaded from modular/voice/cmd.py via _load_external_commands_into) ──
 
 
@@ -3699,6 +4079,7 @@ COMMANDS = {
     "telegram":    cmd_telegram,
     "wechat":      cmd_wechat,
     "weixin":      cmd_wechat,
+    "slack":       cmd_slack,
     "checkpoint":  cmd_checkpoint,
     "rewind":      cmd_rewind,
     "plan":        cmd_plan,
@@ -3808,6 +4189,7 @@ _CMD_META: dict[str, tuple[str, list[str]]] = {
     "ssj":         ("SSJ Developer Mode — power menu",    []),
     "telegram":    ("Telegram bot bridge",                ["stop", "status"]),
     "wechat":      ("WeChat bridge (iLink Bot API)",      ["stop", "status"]),
+    "slack":       ("Slack bot bridge (Web API)",         ["stop", "status", "logout"]),
     **({"video": ("AI video factory: story→voice→images→mp4", ["status", "niches"])} if _VIDEO_AVAILABLE else {}),
     "checkpoint":  ("List / restore checkpoints",          ["clear"]),
     "rewind":      ("Rewind to checkpoint (alias)",        ["clear"]),
@@ -3986,6 +4368,10 @@ def repl(config: dict, initial_prompt: str = None):
             active_flags.append("proactive")
         if config.get("telegram_token") and config.get("telegram_chat_id"):
             active_flags.append("telegram")
+        if config.get("wechat_token"):
+            active_flags.append("wechat")
+        if config.get("slack_token") and config.get("slack_channel"):
+            active_flags.append("slack")
         if active_flags:
             flags_str = " · ".join(clr(f, "green") for f in active_flags)
             info(f"Active: {flags_str}")
@@ -4222,6 +4608,18 @@ def repl(config: dict, initial_prompt: str = None):
                 daemon=True
             )
             _telegram_thread.start()
+
+    # ── Auto-start WeChat bridge if configured ────────────────────────
+    if config.get("wechat_token"):
+        global _wechat_thread, _wechat_stop
+        if not (_wechat_thread and _wechat_thread.is_alive()):
+            _wx_start_bridge(state, config)
+
+    # ── Auto-start Slack bridge if configured ─────────────────────────
+    if config.get("slack_token") and config.get("slack_channel"):
+        global _slack_thread, _slack_stop
+        if not (_slack_thread and _slack_thread.is_alive()):
+            _slack_start_bridge(state, config)
 
     # ── Rapid Ctrl+C force-quit ─────────────────────────────────────────
     # 3 Ctrl+C presses within 2 seconds → immediate hard exit
