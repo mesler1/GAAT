@@ -2,6 +2,16 @@
  
 ## 🔥🔥🔥 News (Pacific Time)
 
+- Apr 07, 2026 (**v3.05.53**): **Telegram photo/voice support, process-tree kill on Bash timeout, Windows shell hints, worker fix**
+  - **Telegram photo vision** — send a photo to the Telegram bridge and CheetahClaws will describe it using the active vision model (GPT-4o, Gemini 2.0 Flash, Claude, etc.). The bot downloads the highest-resolution version, encodes it as Base64, and routes it through the same `_pending_image` path as `/img`. Caption text (or a default "describe this image" prompt) is forwarded alongside the image.
+  - **Telegram voice/audio STT** — send a voice message or audio file to the Telegram bridge and CheetahClaws transcribes it automatically. OGG voice notes are converted to PCM via `ffmpeg` and passed to the local Whisper backend; falls back to the OpenAI Whisper API when `ffmpeg` is unavailable. The transcription is echoed back to the chat before being submitted as a query.
+  - **Process-tree kill on Bash timeout** — when a `Bash` command times out, CheetahClaws now kills the entire child process tree instead of only the shell. On Unix, `os.killpg` sends `SIGKILL` to the process group; on Windows, `taskkill /F /T` terminates all child processes. GUI apps (e.g. PyQt games launched by the agent) no longer leave zombie processes after a timeout. The internal implementation uses `start_new_session=True` instead of `preexec_fn=os.setsid` for thread safety.
+  - **Worker runs all pending tasks by default** — `/worker` previously processed only 1 task per session (a bug). It now runs all pending tasks by default. The `--workers N` flag still limits the batch size when needed.
+  - **Windows shell hints in system prompt** — non-Claude models now receive a Windows-specific shell cheat-sheet in the system prompt (`type` vs `cat`, `dir /s /b` vs `find`, `del` vs `rm`, etc.) so the agent generates correct commands on Windows without manual guidance.
+  - **Bash timeout hints** — the `Bash` tool description now advises the model to use `timeout=120–300` for slow commands (`npm install`, `npx`, `pip install`, builds), reducing spurious 30-second timeouts on package operations.
+  - **Bug fix: background event prompt shows actual cwd** — the yellow re-prompt printed after a background event completed was hardcoded to `[claude-code-local]`; it now shows the real working-directory name (`[{cwd.name}]`), consistent with the main REPL prompt.
+
+
 - Apr 06, 2026 (**v3.05.53**): **Telegram interactive menus, `/img` alias, `/voice device`, OpenAI/Gemini vision support**
   - **Telegram interactive menus fixed** — slash commands with interactive input (e.g. `/ollama`, `/permission`, `/checkpoint`) were blocking the Telegram poll loop, making it impossible to respond to the menu prompts. Slash commands now run in a daemon thread (like regular queries), keeping the poll loop free. All interactive menus (`ask_input_interactive`) work correctly over Telegram.
   - **`/img` alias** — `/img` is now an alias for `/image`, for faster clipboard-image workflows.
