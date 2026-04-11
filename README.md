@@ -77,12 +77,21 @@ English | [中文](https://github.com/SafeRL-Lab/clawspring/blob/main/docs/READM
 
 ---
 
+  <div align=center>
+ <img src="https://github.com/SafeRL-Lab/cheetahclaws/blob/main/docs/slack_demo.gif" width="850"/> 
+ </div>
+<div align=center>
+<center style="color:#000000;text-decoration:underline">Slack Bridge: Control cheetahclaws from Slack</center>
+ </div>
+
+---
+
 
  
 ## 🔥🔥🔥 News (Pacific Time)
 
  
-- Apr 11, 2026 (**v3.05.60**): **Slack bridge via Slack Web API**
+- Apr 11, 2026 (**v3.05.58**): **Slack bridge via Slack Web API**
   - **Slack bridge (`/slack`)** (`cheetahclaws.py`) — `/slack <xoxb-token> <channel_id>` connects cheetahclaws to a Slack channel using the Slack Web API (no external packages required — stdlib `urllib` only). Polls `conversations.history` every 2 seconds for new messages; sends responses via `chat.postMessage`. A "⏳ Thinking…" placeholder is posted immediately and then updated in-place with the real reply when the model finishes.
   - **Slash command passthrough** — send `/cost`, `/model gpt-4o`, `/clear`, etc. from Slack and they execute in cheetahclaws; results are sent back to the same channel.
   - **Interactive menu routing** — permission prompts and interactive menus are routed to Slack; your next message is used as the selection input.
@@ -2111,6 +2120,13 @@ If `wechat_token` is set in `~/.cheetahclaws/config.json`, the bridge starts aut
 ---
 
 ## Slack Bridge
+
+<div align=center>
+<img src="https://github.com/SafeRL-Lab/cheetahclaws/blob/main/docs/slack_demo.gif" width="850"/>
+</div>
+<div align=center>
+<center style="color:#000000;text-decoration:underline">Slack Bridge: Control cheetahclaws from Slack</center>
+</div>
 
 `/slack` connects cheetahclaws to a Slack channel via the **Slack Web API** — no external packages required, just a Bot User OAuth Token and a channel ID. Messages are polled every 2 seconds using `conversations.history`; replies update an in-place "⏳ Thinking…" placeholder so the conversation feels responsive.
 
