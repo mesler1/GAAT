@@ -91,6 +91,16 @@ English | [中文](https://github.com/SafeRL-Lab/clawspring/blob/main/docs/READM
 ## 🔥🔥🔥 News (Pacific Time)
 
  
+- Apr 12, 2026 (**v3.05.59**): **Modular architecture refactoring — monolith → layered packages**
+  - **`cheetahclaws.py` split** — the 5,100-line monolith has been decomposed into focused packages. `cheetahclaws.py` is now a ~1,300-line REPL entry-point; all bridge, UI, and command logic lives in dedicated modules.
+  - **`ui/render.py`** — ANSI color helpers (`clr`, `info`, `ok`, `warn`, `err`) and Rich Live streaming renderer extracted into a standalone package; imported by every module that needs terminal output.
+  - **`bridges/`** — Telegram (`telegram.py`), WeChat (`wechat.py`), and Slack (`slack.py`) bridge implementations moved out of `cheetahclaws.py` into their own sub-package.
+  - **`commands/`** — REPL slash-command handlers extracted into `session.py` (session load/save/export), `config_cmd.py` (/config, /status, /doctor), `core.py` (/clear, /compact, /cost, /verbose, /thinking, /image, /model), `checkpoint_plan.py` (/checkpoint, /rewind, /plan), and `advanced.py` (/brainstorm, /worker, /ssj and related).
+  - **`runtime.py` — `RuntimeContext` singleton** — live session references (`run_query`, `handle_slash`, `agent_state`, `tg_send`, `slack_send`, `wx_send`) that were previously injected into the config dict under `_underscore` keys are now a typed `@dataclass` singleton (`runtime.ctx`). One process → one ctx → no key collisions, no dict sprawl. Per-bridge synchronous input events (`tg_input_event/value`, `slack_input_event/value`, `wx_input_event/value`) are also stored here, eliminating the last threading-Event race in config.
+  - **Packaging fixes** (`pyproject.toml`) — `runtime` added to `py-modules`; `ui`, `bridges`, `commands`, `modular`, `modular.video`, `modular.voice`, `video` added to `packages` so all new layers are included in `pip install .`. `package-data` added for `modular/video/PLUGIN.md` and `modular/voice/PLUGIN.md`.
+  - **pytest config** — `asyncio_default_fixture_loop_scope = "function"` added to silence pytest-asyncio deprecation warnings; `python_files` extended to collect `e2e_*.py` alongside `test_*.py` (267 tests now collected by default).
+  - **Version bumped to 3.05.59.**
+
 - Apr 11, 2026 (**v3.05.58**): **Slack bridge via Slack Web API**
   - **Slack bridge (`/slack`)** (`cheetahclaws.py`) — `/slack <xoxb-token> <channel_id>` connects cheetahclaws to a Slack channel using the Slack Web API (no external packages required — stdlib `urllib` only). Polls `conversations.history` every 2 seconds for new messages; sends responses via `chat.postMessage`. A "⏳ Thinking…" placeholder is posted immediately and then updated in-place with the real reply when the model finishes.
   - **Slash command passthrough** — send `/cost`, `/model gpt-4o`, `/clear`, etc. from Slack and they execute in cheetahclaws; results are sent back to the same channel.
@@ -193,7 +203,7 @@ Claude Code is a powerful, production-grade AI coding assistant — but its sour
 | Dimension | Claude Code (TypeScript) | CheetahClaws (Python) |
 |-----------|--------------------------|---------------------------|
 | Language | TypeScript + React/Ink | Python 3.8+ |
-| Source files | ~1,332 TS/TSX files | 51 Python files |
+| Source files | ~1,332 TS/TSX files | ~70 Python files |
 | Lines of code | ~283K | ~12K |
 | Built-in tools | 44+ | 27 |
 | Slash commands | 88 | 36 |
@@ -251,7 +261,7 @@ Claude Code is a powerful, production-grade AI coding assistant — but its sour
 | Dimension | OpenClaw (TypeScript) | CheetahClaws (Python) |
 |-----------|----------------------|---------------------|
 | Language | TypeScript + Node.js | Python 3.8+ |
-| Source files | ~10,349 TS/JS files | 51 Python files |
+| Source files | ~10,349 TS/JS files | ~70 Python files |
 | Lines of code | ~245K | ~12K |
 | Primary focus | Personal life assistant across messaging channels | AI **coding** assistant / developer tool |
 | Architecture | Always-on Gateway daemon + companion apps | Zero-install terminal REPL |
@@ -3028,7 +3038,8 @@ From that point on, every `/exit` or `/quit` automatically uploads the session b
 
 ```
 cheetahclaws/
-├── cheetahclaws.py        # Entry point: REPL + slash commands + diff rendering + Rich Live streaming + proactive sentinel daemon + SSJ mode + Telegram bridge + WeChat bridge + Slack bridge + Worker command
+├── cheetahclaws.py        # Entry point: REPL loop, readline setup, diff rendering, Rich Live streaming, proactive sentinel daemon, auto-start bridge wiring
+├── runtime.py             # RuntimeContext singleton — live session references (run_query, handle_slash, agent_state, tg/slack/wx send + input events) shared across all modules without polluting the config dict
 ├── agent.py              # Agent loop: streaming, tool dispatch, compaction
 ├── providers.py          # Multi-provider: Anthropic, OpenAI-compat streaming
 ├── tools.py              # Core tools (Read/Write/Edit/Bash/Glob/Grep/Web/NotebookEdit/GetDiagnostics) + registry wiring
@@ -3037,6 +3048,21 @@ cheetahclaws/
 ├── context.py            # System prompt builder: CLAUDE.md + git + memory
 ├── config.py             # Config load/save/defaults; DAILY_DIR, SESSION_HIST_FILE paths
 ├── cloudsave.py          # GitHub Gist cloud sync (upload/download/list sessions)
+│
+├── ui/                   # Terminal output package
+│   └── render.py         # ANSI helpers (clr/info/ok/warn/err), Rich Live Markdown renderer, spinner phrases
+│
+├── bridges/              # Messaging bridge package
+│   ├── telegram.py       # Telegram Bot API bridge: long-poll loop, slash passthrough, input routing, typing indicator
+│   ├── wechat.py         # WeChat iLink bridge: long-poll loop, context_token, typing indicator, session recovery
+│   └── slack.py          # Slack Web API bridge: conversation.history poll, in-place reply update, slash passthrough
+│
+├── commands/             # Slash-command handlers package
+│   ├── session.py        # /save /load /resume /export /copy /history
+│   ├── config_cmd.py     # /config /status /doctor
+│   ├── core.py           # /clear /compact /cost /verbose /thinking /image /model /init
+│   ├── checkpoint_plan.py# /checkpoint /rewind /plan
+│   └── advanced.py       # /brainstorm /worker /ssj /proactive /tasks /agents /skills /memory /mcp /plugin /voice /tts /video
 │
 ├── multi_agent/          # Multi-agent package
 │   ├── __init__.py       # Re-exports
@@ -3099,7 +3125,7 @@ cheetahclaws/
 │   ├── store.py          # File-level backup, snapshot persistence, rewind, cleanup
 │   └── hooks.py          # Write/Edit/NotebookEdit interception — backs up files before modification
 │
-└── tests/                # 263+ unit tests
+└── tests/                # 267+ unit tests
     ├── test_mcp.py
     ├── test_memory.py
     ├── test_skills.py
@@ -3116,7 +3142,7 @@ cheetahclaws/
     └── e2e_commands.py       # 9-step /init /export /copy /status test
 ```
 
-> **For developers:** Each feature package (`multi_agent/`, `memory/`, `skill/`, `mcp/`, `checkpoint/`) is self-contained. Add custom tools by calling `register_tool(ToolDef(...))` from any module imported by `tools.py`. To add a new plug-and-play module to the ecosystem, create `modular/<name>/cmd.py` exporting `COMMAND_DEFS = {"cmdname": {"func": callable, "help": ..., "aliases": []}}` — it is auto-discovered at startup with no registration step.
+> **For developers:** The codebase is organized into clear layers: `runtime.py` holds live cross-module state; `ui/render.py` provides all terminal output helpers; `bridges/` contains each messaging integration; `commands/` contains REPL slash-command handlers; feature packages (`multi_agent/`, `memory/`, `skill/`, `mcp/`, `checkpoint/`) are self-contained. Add custom tools by calling `register_tool(ToolDef(...))` from any module imported by `tools.py`. To add a new plug-and-play module to the ecosystem, create `modular/<name>/cmd.py` exporting `COMMAND_DEFS = {"cmdname": {"func": callable, "help": ..., "aliases": []}}` — it is auto-discovered at startup with no registration step.
 
 ---
 

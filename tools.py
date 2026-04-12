@@ -863,7 +863,8 @@ def ask_input_interactive(prompt: str, config: dict, menu_text: str = None) -> s
     import re as _re_inner, threading as _threading_inner
     # ── Slack routing ──
     is_slack = _is_in_slack_turn(config)
-    if is_slack and "_slack_send_callback" in config:
+    import runtime as _runtime
+    if is_slack and _runtime.ctx.slack_send is not None:
         clean_prompt = _re_inner.sub(r'\x1b\[[0-9;]*m', '', prompt).strip()
         payload = ""
         if menu_text:
@@ -871,16 +872,17 @@ def ask_input_interactive(prompt: str, config: dict, menu_text: str = None) -> s
             payload += f"{clean_menu}\n\n"
         payload += f"❓ Input Required\n{clean_prompt}"
         slack_channel = config.get("_slack_current_channel") or config.get("slack_channel", "")
-        config["_slack_send_callback"](slack_channel, payload)
+        _runtime.ctx.slack_send(slack_channel, payload)
         evt = _threading_inner.Event()
-        config["_slack_input_event"] = evt
+        _runtime.ctx.slack_input_event = evt
         evt.wait()
-        text = config.pop("_slack_input_value", "").strip()
-        config.pop("_slack_input_event", None)
+        text = _runtime.ctx.slack_input_value.strip()
+        _runtime.ctx.slack_input_event = None
+        _runtime.ctx.slack_input_value = ""
         return text
     # ── WeChat routing ──
     is_wx = _is_in_wx_turn(config)
-    if is_wx and "_wx_send_callback" in config:
+    if is_wx and _runtime.ctx.wx_send is not None:
         clean_prompt = _re_inner.sub(r'\x1b\[[0-9;]*m', '', prompt).strip()
         payload = ""
         if menu_text:
@@ -888,16 +890,18 @@ def ask_input_interactive(prompt: str, config: dict, menu_text: str = None) -> s
             payload += f"{clean_menu}\n\n"
         payload += f"❓ 需要输入\n{clean_prompt}"
         wx_user_id = config.get("_wx_current_user_id", "")
-        config["_wx_send_callback"](wx_user_id, payload)
+        _runtime.ctx.wx_send(wx_user_id, payload)
         evt = _threading_inner.Event()
-        config["_wx_input_event"] = evt
+        _runtime.ctx.wx_input_event = evt
         evt.wait()
-        text = config.pop("_wx_input_value", "").strip()
-        config.pop("_wx_input_event", None)
+        text = _runtime.ctx.wx_input_value.strip()
+        _runtime.ctx.wx_input_event = None
+        _runtime.ctx.wx_input_value = ""
         return text
     # ── Telegram routing ──
     is_tg = _is_in_tg_turn(config)
-    if is_tg and "_tg_send_callback" in config:
+    import runtime as _runtime
+    if is_tg and _runtime.ctx.tg_send is not None:
         token = config.get("telegram_token")
         chat_id = config.get("telegram_chat_id")
         import re, threading
@@ -909,14 +913,14 @@ def ask_input_interactive(prompt: str, config: dict, menu_text: str = None) -> s
             payload += f"{clean_menu}\n\n"
         payload += f"❓ *Input Required*\n{clean_prompt}"
 
-        config["_tg_send_callback"](token, chat_id, payload)
+        _runtime.ctx.tg_send(token, chat_id, payload)
 
         evt = threading.Event()
-        config["_tg_input_event"] = evt
+        _runtime.ctx.tg_input_event = evt
         evt.wait()
-
-        text = config.pop("_tg_input_value", "").strip()
-        config.pop("_tg_input_event", None)
+        text = _runtime.ctx.tg_input_value.strip()
+        _runtime.ctx.tg_input_event = None
+        _runtime.ctx.tg_input_value = ""
         return text
     else:
         try:
@@ -998,9 +1002,10 @@ def drain_pending_questions(config: dict) -> bool:
 
 def _sleeptimer(seconds: int, config: dict) -> str:
     import threading
-    cb = config.get("_run_query_callback")
+    import runtime
+    cb = runtime.ctx.run_query
     if not cb:
-        return "Error: Internal callback missing, cheetahclaws did not provide _run_query_callback"
+        return "Error: No active REPL session (runtime.ctx.run_query not set)"
         
     def worker():
         import time

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cheetahclaws"
-version = "3.05.6"
+version = "3.05.59"
 description = "CheetahClaws: A Fast, Hackable Python AI Coding Assistant"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,9 +32,24 @@ py-modules = [
     "config",
     "context",
     "providers",
+    "runtime",
     "skills",
     "subagent",
     "tool_registry",
     "tools",
 ]
-packages = ["mcp", "memory", "multi_agent", "plugin", "skill", "task", "voice", "checkpoint"]
+packages = [
+    "mcp", "memory", "multi_agent", "plugin", "skill", "task",
+    "voice", "video", "checkpoint",
+    "ui", "bridges", "commands",
+    "modular", "modular.video", "modular.voice",
+]
+
+[tool.setuptools.package-data]
+"modular.video" = ["PLUGIN.md"]
+"modular.voice" = ["PLUGIN.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "e2e_*.py"]
+asyncio_default_fixture_loop_scope = "function"

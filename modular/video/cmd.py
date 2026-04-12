@@ -152,7 +152,8 @@ def cmd_video(args: str, _state, config) -> bool:
             topic_parts.append(tokens[i]); i += 1
     topic_from_args = " ".join(topic_parts).strip()
 
-    is_tg = config.get("_telegram_incoming", False)
+    from tools import _is_in_tg_turn
+    is_tg = _is_in_tg_turn(config)
 
     # ════════════════════════════════════════════════════════════════════════════
     # WIZARD — step-based loop with back navigation
