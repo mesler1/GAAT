@@ -2,6 +2,27 @@
  
 ## 🔥🔥🔥 News (Pacific Time)
 
+- Apr 11, 2026 (**v3.05.58**): **Slack bridge via Slack Web API**
+  - **Slack bridge (`/slack`)** (`cheetahclaws.py`) — `/slack <xoxb-token> <channel_id>` connects cheetahclaws to a Slack channel using the Slack Web API (no external packages required — stdlib `urllib` only). Polls `conversations.history` every 2 seconds for new messages; sends responses via `chat.postMessage`. A "⏳ Thinking…" placeholder is posted immediately and then updated in-place with the real reply when the model finishes.
+  - **Slash command passthrough** — send `/cost`, `/model gpt-4o`, `/clear`, etc. from Slack and they execute in cheetahclaws; results are sent back to the same channel.
+  - **Interactive menu routing** — permission prompts and interactive menus are routed to Slack; your next message is used as the selection input.
+  - **Auth check on start** — `auth.test` is called before starting the poll loop; invalid or revoked tokens are caught immediately with a clear error message.
+  - **Auto-start** — `slack_token` + `slack_channel` saved to `~/.cheetahclaws/config.json`; bridge starts automatically on every subsequent launch.
+  - **`/slack stop` / `/slack logout` / `/slack status`** — full lifecycle control; `/stop` sent from Slack also stops the bridge gracefully.
+  - **WeChat / Slack auto-start banner flags** — the startup banner now shows `wechat` and `slack` flags when the respective bridges are configured (previously only `telegram` was shown).
+
+- Apr 11, 2026 (**v3.05.57**): **WeChat bridge, tmux integration, shell escape, `max_tokens` fix, new OpenAI models**
+  - **WeChat bridge (`/wechat`)** (`cheetahclaws.py`) — `/wechat login` authenticates with WeChat by scanning a QR code (same iLink Bot API used by the official WeixinClawBot / `@tencent-weixin/openclaw-weixin` plugin). After a one-time scan, `token` + `base_url` are saved to `~/.cheetahclaws/config.json` and the bridge auto-starts on every subsequent launch. The bridge runs a long-poll loop (`POST /ilink/bot/getupdates`, 35-second window) in a daemon thread — normal timeouts are handled transparently and do not trigger backoff or reconnect.
+  - **context_token echo** — the iLink protocol requires each reply to include the sender's latest `context_token`. The bridge caches this per `user_id` in memory and echoes it automatically on every outbound message.
+  - **Typing indicator** — a `sendtyping` request is sent every 4 seconds while the model processes, keeping the WeChat chat responsive.
+  - **Slash command passthrough** — send `/cost`, `/model gpt-4o`, `/clear`, etc. from WeChat and they execute in cheetahclaws; results are sent back to the same WeChat conversation.
+  - **Session expiry handling** — `errcode -14` (session expired) clears saved credentials and prompts re-authentication on the next `/wechat` call.
+  - **Message deduplication** — `message_id` / `seq` dedup prevents double-processing on reconnect.
+  - **`/wechat stop` / `/wechat logout` / `/wechat status`** — full lifecycle control from the terminal or from WeChat itself (`/stop`).
+  - **Bug fix: `max_tokens` rejected by gpt-5-nano / o4-mini / o3** (`providers.py`) — newer OpenAI models have removed the legacy `max_tokens` parameter and require `max_completion_tokens` instead. Any request using `max_tokens` with these models was returning a 400 error and exhausting all retries. The OpenAI provider now unconditionally sends `max_completion_tokens`; all other OpenAI-compatible providers (Ollama, vLLM, Gemini, Kimi, …) continue to use `max_tokens`, which their servers expect.
+  - **New models listed** — `gpt-5`, `gpt-5-nano`, `gpt-5-mini`, `o3`, `o4-mini` added to the known OpenAI model list so they appear in `/model` suggestions and get the correct token-cap from the provider config.
+  - **Native tmux integration** (`tmux_tools.py`) — 11 tmux tools for the AI agent: `TmuxListSessions`, `TmuxNewSession`, `TmuxSplitWindow`, `TmuxSendKeys`, `TmuxCapture`, `TmuxListPanes`, `TmuxSelectPane`, `TmuxKillPane`, `TmuxNewWindow`, `TmuxListWindows`, `TmuxResizePane`. Auto-detected at startup — tools register only when `tmux` (Linux/macOS) or `psmux` (Windows) is found; zero impact if absent. The AI can now run long-lived commands in visible panes that outlive the Bash tool's timeout, read output on demand with `TmuxCapture`, and build autonomous monitoring loops. System prompt is automatically extended with tmux usage guidance when the binary is present.
+  - **Shell escape** (`cheetahclaws.py`) — type `!` followed by any shell command (`!git status`, `!ls -la`, `!python --version`) to execute it directly without AI involvement. Output prints inline; control returns to the prompt immediately.
 
 - Apr 10, 2026 (**v3.05.56**): **Retry mechanism, improved token estimator, plan-context fix after force compaction**
   - **Retry with exponential backoff** (`agent.py`) — the provider stream loop now retries up to 3 times on any API error instead of crashing the session. Context-too-long errors trigger an immediate force compaction and retry; overloaded/rate-limit errors use longer backoff (4 s, 8 s, 16 s); all other errors use standard backoff (2 s, 4 s, 8 s). After exhausting retries a graceful inline message is shown — the session is never killed.
