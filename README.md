@@ -8,7 +8,7 @@ English | [中文](https://github.com/SafeRL-Lab/clawspring/blob/main/docs/READM
   </a>
 
   
-<h2 align="center" style="font-size: 30px;"><strong><em>CheetahClaws (Nano Claude Code)</em></strong>: A Fast, Easy-to-Use, Python-Native Personal AI Assistant for Any Model, Inspired by OpenClaw and Claude Code, Built to Work for You Autonomously 24/7</h2>
+<h2 align="center" style="font-size: 30px;"><strong><em>CheetahClaws</em></strong>: A Fast, Easy-to-Use, Python-Native Personal AI Assistant for Any Model, Built to Work for You Autonomously 24/7</h2>
 <p align="center">
     <a href="https://github.com/chauncygu/collection-claude-code-source-code">The newest source of Claude Code</a>
     ·
@@ -91,6 +91,18 @@ English | [中文](https://github.com/SafeRL-Lab/clawspring/blob/main/docs/READM
 ## 🔥🔥🔥 News (Pacific Time)
 
  
+- Apr 12, 2026 (**v3.05.60**): **Production reliability, maintainability, and product completeness improvements**
+  - **Structured logging** (`logging_utils.py`) — newline-delimited JSON log output with `error/warn/info/debug` level filtering, thread-safe file or stderr sink, and `configure_from_config()` for zero-boilerplate setup. All API calls, retries, tool events, and bridge lifecycle events now emit structured log events with `session_id` correlation.
+  - **Circuit breaker** (`circuit_breaker.py`) — per-provider three-state machine (`CLOSED → OPEN → HALF_OPEN`) with rolling failure window (default: 5 failures in 60 s) and exponential cooldown (default: 120 s). `providers.py` wraps every streaming call; `agent.py` catches `CircuitOpenError` and returns a user-visible message without retrying.
+  - **Quota control** (`quota.py`) — four enforcement limits (`session_token_budget`, `session_cost_budget`, `daily_token_budget`, `daily_cost_budget`) checked before every API call. Daily accumulation persisted to `~/.cheetahclaws/quota/YYYY-MM-DD.json`; in-memory counters are thread-safe. All nine new config keys registered in `config.py` `DEFAULTS`.
+  - **Explicit bootstrap** (`bootstrap.py`) — startup sequence made visible and testable: ① configure logging → ② import tool registry → ③ start health-check server. `cheetahclaws.py` calls `_bootstrap(config)` once after `load_config()`; all steps are idempotent.
+  - **`tools.py` split** — the 1,400-line `tools.py` decomposed into seven focused sub-modules: `tools_security.py` (path safety, bash whitelist), `tools_fs.py` (read/write/edit/diff/glob), `tools_shell.py` (bash/grep/process-tree), `tools_web.py` (webfetch/websearch), `tools_notebook.py` (NotebookEdit), `tools_diagnostics.py` (GetDiagnostics), `tools_interaction.py` (AskUserQuestion, SleepTimer, drain_pending_questions). `tools.py` remains as a thin re-export shim — all `from tools import X` calls continue to work unchanged.
+  - **Session file versioning** (`commands/session.py`) — saved session files now include `"_version": 1`. `_migrate_session()` upgrades v0 → v1 on load/resume; future schema changes can add new migration steps without breaking existing saves.
+  - **Health-check HTTP server** (`health.py`) — optional daemon thread started via `health_check_port` config key. Three endpoints: `GET /healthz` (always 200, uptime + active sessions), `GET /readyz` (503 if any circuit breaker is open), `GET /metrics` (full JSON: uptime, model, sessions, circuit states, daily token/cost usage).
+  - **Bridge auto-reconnect** (`bridges/telegram.py`, `bridges/slack.py`, `bridges/wechat.py`) — each poll loop now returns an exit reason (`"stopped"` for clean shutdown, `"auth_error"` for invalid token). A supervisor wrapper (`_tg/slack/wx_supervisor`) catches unexpected crashes and restarts the poll loop with exponential backoff (2 s → 4 s → … → 120 s). Auth errors stop the bridge immediately without reconnect. All bridges log `bridge_crash` / `bridge_auth_error` events via `logging_utils`.
+  - **`/help` completeness** — 13 commands that were registered but missing from the help docstring are now shown: `/resume`, `/status`, `/compact`, `/init`, `/export`, `/copy`, `/doctor`, `/checkpoint`, `/rewind`, `/plan`, `/brainstorm`, `/worker`, `/image`. Product tagline updated to reflect CheetahClaws's current scope.
+  - **Version bumped to 3.05.60.**
+
 - Apr 12, 2026 (**v3.05.59**): **Modular architecture refactoring — monolith → layered packages**
   - **`cheetahclaws.py` split** — the 5,100-line monolith has been decomposed into focused packages. `cheetahclaws.py` is now a ~1,300-line REPL entry-point; all bridge, UI, and command logic lives in dedicated modules.
   - **`ui/render.py`** — ANSI color helpers (`clr`, `info`, `ok`, `warn`, `err`) and Rich Live streaming renderer extracted into a standalone package; imported by every module that needs terminal output.
@@ -196,7 +208,7 @@ Claude Code is a powerful, production-grade AI coding assistant — but its sour
 | Dimension | Claude Code (TypeScript) | CheetahClaws (Python) |
 |-----------|--------------------------|---------------------------|
 | Language | TypeScript + React/Ink | Python 3.8+ |
-| Source files | ~1,332 TS/TSX files | ~70 Python files |
+| Source files | ~1,332 TS/TSX files | ~85 Python files |
 | Lines of code | ~283K | ~12K |
 | Built-in tools | 44+ | 27 |
 | Slash commands | 88 | 36 |
@@ -254,7 +266,7 @@ Claude Code is a powerful, production-grade AI coding assistant — but its sour
 | Dimension | OpenClaw (TypeScript) | CheetahClaws (Python) |
 |-----------|----------------------|---------------------|
 | Language | TypeScript + Node.js | Python 3.8+ |
-| Source files | ~10,349 TS/JS files | ~70 Python files |
+| Source files | ~10,349 TS/JS files | ~85 Python files |
 | Lines of code | ~245K | ~12K |
 | Primary focus | Personal life assistant across messaging channels | AI **coding** assistant / developer tool |
 | Architecture | Always-on Gateway daemon + companion apps | Zero-install terminal REPL |

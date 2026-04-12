@@ -22,6 +22,7 @@ import secrets as _secrets_mod
 
 from ui.render import clr, info, ok, warn, err
 import runtime
+import logging_utils as _log
 
 _wechat_thread: threading.Thread | None = None
 _wechat_stop = threading.Event()
@@ -256,13 +257,15 @@ def _wx_qr_login(config: dict, bot_type: str = _ILINK_DEFAULT_BOT_TYPE,
 
 # ── Poll loop ──────────────────────────────────────────────────────────────
 
-def _wx_poll_loop(token: str, base_url: str, config: dict) -> None:
+def _wx_poll_loop(token: str, base_url: str, config: dict) -> str:
+    """Returns "stopped", "auth_error", or raises on unexpected fatal error."""
     from tools import _wx_thread_local
-    run_query_cb = runtime.ctx.run_query
+    session_ctx = runtime.get_session_ctx(config.get("_session_id", "default"))
+    run_query_cb = session_ctx.run_query
     sync_buf = ""
     consecutive_failures = 0
 
-    runtime.ctx.wx_send = lambda uid, txt: _wx_send(uid, txt, config)
+    session_ctx.wx_send = lambda uid, txt: _wx_send(uid, txt, config)
 
     while not _wechat_stop.is_set():
         try:
@@ -287,7 +290,9 @@ def _wx_poll_loop(token: str, base_url: str, config: dict) -> None:
                     config.pop("wechat_base_url", None)
                     from config import save_config
                     save_config(config)
-                    break
+                    _log.warn("bridge_auth_error", bridge="wechat", ret=ret, errcode=errcode)
+                    session_ctx.wx_send = None
+                    return "auth_error"
                 errmsg = result.get("errmsg", "")
                 print(clr(f"\n  ⚠ WeChat: API error ret={ret} errcode={errcode} {errmsg}, retrying...", "yellow"))
                 _wechat_stop.wait(5)
@@ -327,9 +332,9 @@ def _wx_poll_loop(token: str, base_url: str, config: dict) -> None:
                 if not text or not from_uid:
                     continue
 
-                evt = runtime.ctx.wx_input_event
+                evt = session_ctx.wx_input_event
                 if evt and config.get("_wx_current_user_id") == from_uid:
-                    runtime.ctx.wx_input_value = text
+                    session_ctx.wx_input_value = text
                     evt.set()
                     continue
 
@@ -345,7 +350,7 @@ def _wx_poll_loop(token: str, base_url: str, config: dict) -> None:
                     continue
 
                 if text.strip().startswith("/"):
-                    slash_cb = runtime.ctx.handle_slash
+                    slash_cb = session_ctx.handle_slash
                     if slash_cb:
                         def _wx_slash_runner(_slash_text, _uid):
                             _wx_thread_local.active = True
@@ -362,7 +367,7 @@ def _wx_poll_loop(token: str, base_url: str, config: dict) -> None:
                                 cmd_name = _slash_text.strip().split()[0]
                                 _wx_send(_uid, f"✅ {cmd_name} executed.", config)
                                 return
-                            wx_state = runtime.ctx.agent_state
+                            wx_state = session_ctx.agent_state
                             if wx_state and wx_state.messages:
                                 for m in reversed(wx_state.messages):
                                     if m.get("role") == "assistant":
@@ -401,7 +406,7 @@ def _wx_poll_loop(token: str, base_url: str, config: dict) -> None:
                         config.pop("_in_wechat_turn", None)
                         config.pop("_wx_current_user_id", None)
                     _typing_stop.set()
-                    state = runtime.ctx.agent_state
+                    state = session_ctx.agent_state
                     if state and state.messages:
                         for m in reversed(state.messages):
                             if m.get("role") == "assistant":
@@ -422,9 +427,41 @@ def _wx_poll_loop(token: str, base_url: str, config: dict) -> None:
         except Exception:
             _wechat_stop.wait(5)
 
+    session_ctx.wx_send = None
+    return "stopped"
+
+
+_WX_BACKOFF_INITIAL = 2.0
+_WX_BACKOFF_MAX     = 120.0
+
+
+def _wx_supervisor(token: str, base_url: str, config: dict) -> None:
+    """Wrap _wx_poll_loop with exponential-backoff reconnect on unexpected exit."""
     global _wechat_thread
+    backoff = _WX_BACKOFF_INITIAL
+    attempt = 0
+    while not _wechat_stop.is_set():
+        attempt += 1
+        try:
+            reason = _wx_poll_loop(token, base_url, config)
+        except Exception as exc:
+            if _wechat_stop.is_set():
+                break
+            _log.warn("bridge_crash", bridge="wechat", attempt=attempt,
+                      error=str(exc)[:200], backoff_s=backoff)
+            print(clr(f"\n  ⚠ WeChat bridge crashed (attempt {attempt}), "
+                      f"reconnecting in {backoff:.0f}s…", "yellow"))
+            _wechat_stop.wait(backoff)
+            backoff = min(backoff * 2, _WX_BACKOFF_MAX)
+            continue
+
+        if reason == "auth_error":
+            print(clr("\n  ⚠ WeChat: session expired — stopping bridge. Use /wechat login.", "yellow"))
+            _log.warn("bridge_auth_error_stop", bridge="wechat")
+            break
+        break
+
     _wechat_thread = None
-    runtime.ctx.wx_send = None
 
 
 def _wx_start_bridge(config) -> None:
@@ -433,7 +470,8 @@ def _wx_start_bridge(config) -> None:
     base_url = config.get("wechat_base_url", _ILINK_BASE_URL)
     _wechat_stop = threading.Event()
     _wechat_thread = threading.Thread(
-        target=_wx_poll_loop, args=(token, base_url, config), daemon=True
+        target=_wx_supervisor, args=(token, base_url, config), daemon=True,
+        name="wechat-bridge"
     )
     _wechat_thread.start()
     ok("WeChat bridge started.")

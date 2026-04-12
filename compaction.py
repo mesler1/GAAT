@@ -6,6 +6,17 @@ import providers
 
 # ── Token estimation ──────────────────────────────────────────────────────
 
+def _count_str_chars(obj) -> int:
+    """Recursively count total characters across all string values in a nested structure."""
+    if isinstance(obj, str):
+        return len(obj)
+    if isinstance(obj, dict):
+        return sum(_count_str_chars(v) for v in obj.values())
+    if isinstance(obj, list):
+        return sum(_count_str_chars(item) for item in obj)
+    return 0
+
+
 def estimate_tokens(messages: list) -> int:
     """Estimate token count. Uses chars/2.8 (conservative for code-heavy content).
 
@@ -35,10 +46,9 @@ def estimate_tokens(messages: list) -> int:
                         if isinstance(v, str):
                             total_chars += len(v)
         for tc in m.get("tool_calls", []):
-            if isinstance(tc, dict):
-                for v in tc.values():
-                    if isinstance(v, str):
-                        total_chars += len(v)
+            # Recursively count all string values, including nested input dicts
+            # (e.g. {"id": "c1", "name": "Bash", "input": {"command": "..."}})
+            total_chars += _count_str_chars(tc)
     # chars/2.8 for content + 4 tokens/msg framing overhead + 10% buffer
     content_tokens = int(total_chars / 2.8)
     framing_tokens = msg_count * 4
@@ -107,6 +117,9 @@ def find_split_point(messages: list, keep_ratio: float = 0.3) -> int:
     Returns:
         split index (messages[:idx] = old, messages[idx:] = recent)
     """
+    if not messages:
+        return 0
+    keep_ratio = max(0.0, min(1.0, keep_ratio))
     total = estimate_tokens(messages)
     target = int(total * keep_ratio)
     running = 0

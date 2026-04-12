@@ -559,8 +559,9 @@ def stream_ollama(
                 if isinstance(fn.get("arguments"), str):
                     try:
                         fn["arguments"] = json.loads(fn["arguments"])
-                    except Exception:
-                        pass
+                    except json.JSONDecodeError:
+                        import sys
+                        print(f"[warn] Failed to parse tool arguments as JSON, leaving as string: {fn['arguments']!r}", file=sys.stderr)
     
     payload = {
         "model": model,
@@ -606,7 +607,7 @@ def stream_ollama(
             if not line.strip(): continue
             try:
                 data = json.loads(line)
-            except Exception:
+            except json.JSONDecodeError:
                 continue
             
             msg = data.get("message", {})
@@ -651,14 +652,34 @@ def stream(
     Unified streaming entry point.
     Auto-detects provider from model string.
     Yields: TextChunk | ThinkingChunk | AssistantTurn
+
+    Wraps every provider with:
+      - Circuit breaker: fails fast when a provider has repeated errors.
+      - Structured logging: logs api_call_start / api_call_done / api_call_error.
     """
+    import logging_utils as _log
+    import circuit_breaker as _cb
+
     provider_name = detect_provider(model)
     model_name    = bare_model(model)
     prov          = PROVIDERS.get(provider_name, PROVIDERS["openai"])
     api_key       = get_api_key(provider_name, config)
+    session_id    = config.get("_session_id", "default")
 
+    # ── Circuit breaker gate ───────────────────────────────────────────────
+    breaker = _cb.get_breaker(provider_name, config)
+    if not breaker.allow_request():
+        raise _cb.CircuitOpenError(
+            f"Circuit breaker OPEN for provider '{provider_name}'. "
+            f"Cooldown: {breaker.cooldown:.0f}s. Use /circuit reset {provider_name} to force-close."
+        )
+
+    _log.debug("api_call_start", session_id=session_id,
+               provider=provider_name, model=model_name)
+
+    # ── Build inner generator ──────────────────────────────────────────────
     if prov["type"] == "anthropic":
-        yield from stream_anthropic(api_key, model_name, system, messages, tool_schemas, config)
+        inner = stream_anthropic(api_key, model_name, system, messages, tool_schemas, config)
     elif prov["type"] == "ollama":
         import os as _os
         base_url = (
@@ -666,7 +687,7 @@ def stream(
             or config.get("ollama_base_url")
             or prov.get("base_url", "http://localhost:11434")
         )
-        yield from stream_ollama(base_url, model_name, system, messages, tool_schemas, config)
+        inner = stream_ollama(base_url, model_name, system, messages, tool_schemas, config)
     else:
         import os as _os
         if provider_name == "custom":
@@ -679,9 +700,25 @@ def stream(
                 )
         else:
             base_url = prov.get("base_url", "https://api.openai.com/v1")
-        yield from stream_openai_compat(
+        inner = stream_openai_compat(
             api_key, base_url, model_name, system, messages, tool_schemas, config
         )
+
+    # ── Yield with failure tracking ────────────────────────────────────────
+    try:
+        for event in inner:
+            if isinstance(event, AssistantTurn):
+                breaker.record_success()
+                _log.info("api_call_done", session_id=session_id,
+                          provider=provider_name, model=model_name,
+                          in_tokens=event.in_tokens, out_tokens=event.out_tokens)
+            yield event
+    except Exception as exc:
+        breaker.record_failure()
+        _log.error("api_call_error", session_id=session_id,
+                   provider=provider_name, model=model_name,
+                   error_type=type(exc).__name__, error=str(exc)[:200])
+        raise
 
 
 def list_ollama_models(base_url: str) -> list[str]:
@@ -692,5 +729,5 @@ def list_ollama_models(base_url: str) -> list[str]:
             data = json.loads(resp.read().decode("utf-8"))
             # Ollama returns {"models": [{"name": "llama3:latest", ...}, ...]}
             return [m["name"] for m in data.get("models", [])]
-    except Exception:
+    except (OSError, urllib.error.URLError, json.JSONDecodeError):
         return []

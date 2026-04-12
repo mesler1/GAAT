@@ -1,12 +1,15 @@
 """
 runtime.py — Live session context for CheetahClaws.
 
-Holds the object references that were previously stuffed into the config dict
-under underscore-prefixed keys (_run_query_callback, _handle_slash_callback,
-_state, _tg_send_callback).  There is exactly one RuntimeContext per process.
+Each REPL session (and each bridge connection) gets its own RuntimeContext
+keyed by session_id.  This prevents concurrent sessions from corrupting
+each other's callbacks, input events, and agent state.
 
-Bridges, tools, and the proactive watcher all reach these via the module-level
-`ctx` singleton — no function-signature changes required in call sites.
+Use get_session_ctx(session_id) to obtain the context for a specific session.
+Use release_session_ctx(session_id) when a session ends to free the entry.
+
+The module-level `ctx` alias points to the "default" session and exists only
+for backward compatibility with single-session CLI usage.
 """
 from __future__ import annotations
 
@@ -21,6 +24,9 @@ if TYPE_CHECKING:
 @dataclass
 class RuntimeContext:
     """Live references wired up when the REPL starts.  Not persisted to disk."""
+
+    # Unique identifier for this session (matches config["_session_id"])
+    session_id: str = "default"
 
     # Fire a background query from any thread (set by repl())
     run_query: Optional[Callable[[str], None]] = None
@@ -42,7 +48,7 @@ class RuntimeContext:
 
     # Per-bridge synchronous-input synchronisation.
     # ask_input_interactive() sets the event, the poll loop fires it with the
-    # user-supplied text.  Using runtime.ctx keeps these out of the config dict
+    # user-supplied text.  Using RuntimeContext keeps these out of the config dict
     # and makes the coupling between tools.py and each bridge explicit.
     tg_input_event:    Optional[threading.Event] = None
     tg_input_value:    str = ""
@@ -52,6 +58,26 @@ class RuntimeContext:
     wx_input_value:    str = ""
 
 
-# ── Module-level singleton ─────────────────────────────────────────────────
-# One process → one REPL → one ctx.  Reset between test runs if needed.
-ctx = RuntimeContext()
+# ── Per-session registry ───────────────────────────────────────────────────
+
+_registry: dict[str, RuntimeContext] = {}
+_registry_lock = threading.Lock()
+
+
+def get_session_ctx(session_id: str = "default") -> RuntimeContext:
+    """Return (creating if needed) the RuntimeContext for the given session."""
+    with _registry_lock:
+        if session_id not in _registry:
+            _registry[session_id] = RuntimeContext(session_id=session_id)
+        return _registry[session_id]
+
+
+def release_session_ctx(session_id: str) -> None:
+    """Remove the RuntimeContext for a session that has ended."""
+    with _registry_lock:
+        _registry.pop(session_id, None)
+
+
+# ── Backward-compat alias ──────────────────────────────────────────────────
+# Single-session CLI code that does `import runtime; runtime.ctx.xxx` still works.
+ctx = get_session_ctx("default")

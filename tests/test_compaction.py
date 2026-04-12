@@ -12,6 +12,11 @@ from compaction import estimate_tokens, get_context_limit, snip_old_tool_results
 
 # ── estimate_tokens ───────────────────────────────────────────────────────
 
+def _expected(chars: int, msgs: int) -> int:
+    """Mirror the estimate_tokens formula: int((int(chars/2.8) + msgs*4) * 1.1)"""
+    return int((int(chars / 2.8) + msgs * 4) * 1.1)
+
+
 class TestEstimateTokens:
     def test_simple_messages(self):
         msgs = [
@@ -19,22 +24,23 @@ class TestEstimateTokens:
             {"role": "assistant", "content": "Hi there!"},       # 9 chars
         ]
         result = estimate_tokens(msgs)
-        # (11 + 9) / 3.5 = 5.71 -> 5
-        assert result == int(20 / 3.5)
+        # 20 chars, 2 messages → _expected(20, 2)
+        assert result == _expected(20, 2)
 
     def test_empty_messages(self):
         assert estimate_tokens([]) == 0
 
     def test_empty_content(self):
         msgs = [{"role": "user", "content": ""}]
-        assert estimate_tokens(msgs) == 0
+        # 0 chars + 1 msg framing overhead
+        assert estimate_tokens(msgs) == _expected(0, 1)
 
     def test_tool_result_messages(self):
         msgs = [
             {"role": "tool", "tool_call_id": "abc", "name": "Read", "content": "x" * 350},
         ]
         result = estimate_tokens(msgs)
-        assert result == int(350 / 3.5)
+        assert result == _expected(350, 1)
 
     def test_structured_content(self):
         """Content that is a list of dicts (e.g. Anthropic tool_result blocks)."""
@@ -47,8 +53,8 @@ class TestEstimateTokens:
             },
         ]
         result = estimate_tokens(msgs)
-        # "tool_result" (11) + "id1" (3) + "A"*70 (70) = 84  -> 84/3.5 = 24
-        assert result == int(84 / 3.5)
+        # "tool_result" (11) + "id1" (3) + "A"*70 (70) = 84 chars, 1 message
+        assert result == _expected(84, 1)
 
     def test_with_tool_calls(self):
         msgs = [
@@ -61,8 +67,24 @@ class TestEstimateTokens:
             },
         ]
         result = estimate_tokens(msgs)
-        # content "ok" (2) + tool_calls string values: "c1" (2) + "Bash" (4) = 8
-        assert result == int(8 / 3.5)
+        # content "ok" (2) + tool_calls recursively: "c1"(2) + "Bash"(4) + "ls"(2) = 10 chars
+        # (nested input dict values ARE now counted)
+        assert result == _expected(10, 1)
+
+    def test_deeply_nested_tool_input(self):
+        """Deeply nested tool input values are all counted."""
+        msgs = [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "x", "name": "Write", "input": {"file_path": "/a/b", "content": "hello"}},
+                ],
+            },
+        ]
+        result = estimate_tokens(msgs)
+        # "x"(1) + "Write"(5) + "/a/b"(4) + "hello"(5) = 15 chars, 1 msg
+        assert result == _expected(15, 1)
 
 
 # ── get_context_limit ─────────────────────────────────────────────────────

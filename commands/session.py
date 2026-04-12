@@ -13,6 +13,27 @@ from pathlib import Path
 
 from ui.render import clr, info, ok, warn, err
 
+# ── Session format version ─────────────────────────────────────────────────
+# Increment when the on-disk structure changes in a backward-incompatible way.
+# Loaders call _migrate_session(data) which upgrades older files in memory.
+SESSION_VERSION = 1
+
+
+def _migrate_session(data: dict) -> dict:
+    """Upgrade a session dict to the current SESSION_VERSION format.
+
+    Always returns a (possibly modified) copy — never mutates the input.
+    Unknown future versions are accepted as-is to be forward-compatible.
+    """
+    v = data.get("_version", 0)
+    if v == SESSION_VERSION:
+        return data           # already current
+    out = dict(data)
+    # v0 → v1: no structural change; just tag it
+    if v == 0:
+        out["_version"] = 1
+    return out
+
 
 # ── Session data builder ───────────────────────────────────────────────────
 
@@ -20,6 +41,7 @@ def _build_session_data(state, session_id: str | None = None) -> dict:
     """Serialize current conversation state to a JSON-serializable dict."""
     import uuid
     return {
+        "_version": SESSION_VERSION,
         "session_id": session_id or uuid.uuid4().hex[:8],
         "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "messages": [
@@ -218,7 +240,7 @@ def cmd_load(args: str, state, config) -> bool:
             loaded_names = []
             for idx in indices:
                 s_path = sessions[idx]
-                s_data = json.loads(s_path.read_text())
+                s_data = _migrate_session(json.loads(s_path.read_text()))
                 all_messages.extend(s_data.get("messages", []))
                 total_turns += s_data.get("turn_count", 0)
                 loaded_names.append(s_path.name)
@@ -248,7 +270,7 @@ def cmd_load(args: str, state, config) -> bool:
             err(f"File not found: {path}")
             return True
 
-    data = json.loads(path.read_text())
+    data = _migrate_session(json.loads(path.read_text()))
     state.messages = data.get("messages", [])
     state.turn_count = data.get("turn_count", 0)
     state.total_input_tokens = data.get("total_input_tokens", 0)
@@ -275,7 +297,7 @@ def cmd_resume(args: str, state, config) -> bool:
         err(f"File not found: {path}")
         return True
 
-    data = json.loads(path.read_text())
+    data = _migrate_session(json.loads(path.read_text()))
     state.messages = data.get("messages", [])
     state.turn_count = data.get("turn_count", 0)
     state.total_input_tokens = data.get("total_input_tokens", 0)

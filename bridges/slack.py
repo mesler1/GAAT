@@ -16,6 +16,7 @@ import threading
 
 from ui.render import clr, info, ok, warn, err
 import runtime
+import logging_utils as _log
 
 _slack_thread: threading.Thread | None = None
 _slack_stop   = threading.Event()
@@ -66,11 +67,13 @@ def _slack_send(token: str, channel: str, text: str) -> None:
 
 # ── Poll loop ──────────────────────────────────────────────────────────────
 
-def _slack_poll_loop(token: str, channel: str, config: dict) -> None:
+def _slack_poll_loop(token: str, channel: str, config: dict) -> str:
+    """Returns "stopped", "auth_error", or raises on unexpected fatal error."""
     from tools import _slack_thread_local
-    run_query_cb = runtime.ctx.run_query
+    session_ctx = runtime.get_session_ctx(config.get("_session_id", "default"))
+    run_query_cb = session_ctx.run_query
 
-    runtime.ctx.slack_send = lambda ch, txt: _slack_send(token, ch, txt)
+    session_ctx.slack_send = lambda ch, txt: _slack_send(token, ch, txt)
     _slack_send(token, channel, "🟢 cheetahclaws is online. Send me a message and I'll process it.")
 
     import time as _time
@@ -102,7 +105,9 @@ def _slack_poll_loop(token: str, channel: str, config: dict) -> None:
                 slack_err = result.get("error", "unknown")
                 if slack_err in ("invalid_auth", "token_revoked", "account_inactive"):
                     print(clr(f"\n  ⚠ Slack: auth error ({slack_err}) — use /slack logout and reconnect", "yellow"))
-                    break
+                    _log.warn("bridge_auth_error", bridge="slack", error=slack_err)
+                    session_ctx.slack_send = None
+                    return "auth_error"
                 print(clr(f"\n  ⚠ Slack: API error {slack_err}, retrying...", "yellow"))
                 _slack_stop.wait(5)
                 continue
@@ -133,9 +138,9 @@ def _slack_poll_loop(token: str, channel: str, config: dict) -> None:
                 user_id = msg.get("user", "unknown")
                 print(clr(f"\n  📩 Slack [{user_id[:8]}]: {text}", "cyan"))
 
-                evt = runtime.ctx.slack_input_event
+                evt = session_ctx.slack_input_event
                 if evt:
-                    runtime.ctx.slack_input_value = text
+                    session_ctx.slack_input_value = text
                     evt.set()
                     continue
 
@@ -149,7 +154,7 @@ def _slack_poll_loop(token: str, channel: str, config: dict) -> None:
                     continue
 
                 if text.strip().startswith("/"):
-                    slash_cb = runtime.ctx.handle_slash
+                    slash_cb = session_ctx.handle_slash
                     if slash_cb:
                         def _slack_slash_runner(_slash_text, _ch):
                             _slack_thread_local.active = True
@@ -166,7 +171,7 @@ def _slack_poll_loop(token: str, channel: str, config: dict) -> None:
                                 cmd_name = _slash_text.strip().split()[0]
                                 _slack_send(token, _ch, f"✅ {cmd_name} executed.")
                                 return
-                            slack_state = runtime.ctx.agent_state
+                            slack_state = session_ctx.agent_state
                             if slack_state and slack_state.messages:
                                 for m in reversed(slack_state.messages):
                                     if m.get("role") == "assistant":
@@ -205,7 +210,7 @@ def _slack_poll_loop(token: str, channel: str, config: dict) -> None:
                         config.pop("_slack_current_channel", None)
 
                     reply = ""
-                    state = runtime.ctx.agent_state
+                    state = session_ctx.agent_state
                     if state and state.messages:
                         for m in reversed(state.messages):
                             if m.get("role") == "assistant":
@@ -236,9 +241,41 @@ def _slack_poll_loop(token: str, channel: str, config: dict) -> None:
         except Exception:
             _slack_stop.wait(5)
 
+    session_ctx.slack_send = None
+    return "stopped"
+
+
+_SLACK_BACKOFF_INITIAL = 2.0
+_SLACK_BACKOFF_MAX     = 120.0
+
+
+def _slack_supervisor(token: str, channel: str, config: dict) -> None:
+    """Wrap _slack_poll_loop with exponential-backoff reconnect on unexpected exit."""
     global _slack_thread
+    backoff = _SLACK_BACKOFF_INITIAL
+    attempt = 0
+    while not _slack_stop.is_set():
+        attempt += 1
+        try:
+            reason = _slack_poll_loop(token, channel, config)
+        except Exception as exc:
+            if _slack_stop.is_set():
+                break
+            _log.warn("bridge_crash", bridge="slack", attempt=attempt,
+                      error=str(exc)[:200], backoff_s=backoff)
+            print(clr(f"\n  ⚠ Slack bridge crashed (attempt {attempt}), "
+                      f"reconnecting in {backoff:.0f}s…", "yellow"))
+            _slack_stop.wait(backoff)
+            backoff = min(backoff * 2, _SLACK_BACKOFF_MAX)
+            continue
+
+        if reason == "auth_error":
+            print(clr("\n  ⚠ Slack: invalid token — stopping bridge. Use /slack logout.", "yellow"))
+            _log.warn("bridge_auth_error_stop", bridge="slack")
+            break
+        break
+
     _slack_thread = None
-    runtime.ctx.slack_send = None
 
 
 def _slack_start_bridge(config) -> None:
@@ -247,7 +284,8 @@ def _slack_start_bridge(config) -> None:
     channel = config.get("slack_channel", "")
     _slack_stop = threading.Event()
     _slack_thread = threading.Thread(
-        target=_slack_poll_loop, args=(token, channel, config), daemon=True
+        target=_slack_supervisor, args=(token, channel, config), daemon=True,
+        name="slack-bridge"
     )
     _slack_thread.start()
     ok("Slack bridge started.")

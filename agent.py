@@ -12,6 +12,9 @@ from tools import execute_tool
 import tools as _tools_init  # ensure built-in tools are registered on import
 from providers import stream, AssistantTurn, TextChunk, ThinkingChunk, detect_provider
 from compaction import maybe_compact, estimate_tokens, get_context_limit, compact_messages
+import logging_utils as _log
+import quota as _quota
+from circuit_breaker import CircuitOpenError as _CircuitOpenError
 
 # ── Re-export event types (used by cheetahclaws.py) ────────────────────────
 __all__ = [
@@ -81,6 +84,10 @@ def run(
 
     # Inject runtime metadata into config so tools (e.g. Agent) can access it
     config = {**config, "_depth": depth, "_system_prompt": system_prompt}
+    session_id = config.get("_session_id", "default")
+
+    # Wire up structured logging from config (idempotent, cheap)
+    _log.configure_from_config(config)
 
     while True:
         if cancel_check and cancel_check():
@@ -90,6 +97,14 @@ def run(
 
         # Compact context if approaching window limit
         maybe_compact(state, config)
+
+        # ── Quota check — before spending tokens ──────────────────────────
+        try:
+            _quota.check_quota(session_id, config)
+        except _quota.QuotaExceeded as qe:
+            _log.warn("quota_exceeded", session_id=session_id, reason=qe.reason)
+            yield TextChunk(f"\n[Quota exceeded — {qe.reason}]\n")
+            break
 
         # Stream from provider — retry on ANY error (never crash the session)
         max_retries = 3
@@ -106,13 +121,28 @@ def run(
                         yield event
                     elif isinstance(event, AssistantTurn):
                         assistant_turn = event
+                        # Record usage for quota tracking
+                        _quota.record_usage(
+                            session_id, config["model"],
+                            event.in_tokens, event.out_tokens,
+                        )
                 break  # success — exit retry loop
+
+            except _CircuitOpenError as e:
+                _log.warn("circuit_open_skip", session_id=session_id,
+                          error=str(e)[:200])
+                yield TextChunk(f"\n[{e}]\n")
+                return  # circuit manages its own cooldown — don't retry
+
             except Exception as e:
                 if attempt >= max_retries:
+                    _log.error("api_failed", session_id=session_id,
+                               error_type=type(e).__name__,
+                               error=_truncate_err(str(e)))
                     yield TextChunk(f"\n[Failed after {max_retries} retries — {_truncate_err(str(e))}. Please retry manually.]\n")
                     break  # give up gracefully instead of crashing
 
-                err_str = str(e).lower()
+                err_str  = str(e).lower()
                 err_type = type(e).__name__
 
                 is_context_too_long = any(s in err_str for s in [
@@ -128,11 +158,16 @@ def run(
                     yield TextChunk(f"\n[Context too long — compacted and retrying (attempt {attempt+1}/{max_retries})]\n")
                     continue
 
-                # All other errors: backoff + retry (overloaded gets longer backoff)
+                # All other errors: backoff + retry (overloaded/rate-limit get longer backoff)
                 if is_overloaded or is_rate_limit:
                     backoff = min(30, 2 ** (attempt + 2))  # 4s, 8s, 16s
                 else:
                     backoff = 2 ** (attempt + 1)  # 2s, 4s, 8s
+                _log.warn("api_retry", session_id=session_id,
+                          attempt=attempt + 1, max_retries=max_retries,
+                          error_type=err_type,
+                          error=_truncate_err(str(e)),
+                          backoff_s=backoff)
                 yield TextChunk(f"\n[Retry {attempt+1}/{max_retries} after {backoff}s — {err_type}: {_truncate_err(str(e))}]\n")
                 time.sleep(backoff)
 
@@ -156,6 +191,8 @@ def run(
         # ── Execute tools ────────────────────────────────────────────────
         for tc in assistant_turn.tool_calls:
             yield ToolStart(tc["name"], tc["input"])
+            _log.debug("tool_start", session_id=session_id,
+                       tool=tc["name"], input_keys=list(tc["input"].keys()))
 
             # Permission gate
             permitted = _check_permission(tc, config)
@@ -185,6 +222,9 @@ def run(
                     config=config,
                 )
 
+            _log.debug("tool_end", session_id=session_id,
+                       tool=tc["name"], permitted=permitted,
+                       result_len=len(result))
             yield ToolEnd(tc["name"], result, permitted)
 
             # Append tool result in neutral format

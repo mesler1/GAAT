@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CheetahClaws — Minimal Python implementation of Claude Code.
+CheetahClaws — A Fast, Easy-to-Use, Python-Native Personal AI Assistant for Any Model, Built to Work for You Autonomously 24/7.
 
 Usage:
   python cheetahclaws.py [options] [prompt]
@@ -19,13 +19,20 @@ Slash commands in REPL:
   /config     Show config / set key=value
   /save [f]   Save session to file
   /load [f]   Load session from file
+  /resume [f] Resume last auto-saved session (or a named file)
   /history    Print conversation history
   /context    Show context window usage
   /cost       Show API cost this session
+  /status     Show current session status (model, mode, tokens, cost)
   /verbose    Toggle verbose mode
   /thinking   Toggle extended thinking
   /permissions [mode]  Set permission mode
   /cwd [path] Show or change working directory
+  /compact    Compact conversation history to save context space
+  /init       Initialize a CLAUDE.md file in the current directory
+  /export [f] Export conversation history to a Markdown file
+  /copy       Copy the last assistant response to clipboard
+  /doctor     Diagnose installation health and tool connectivity
   /memory [query]         Show/search persistent memories
   /memory consolidate     Extract long-term insights from current session via AI
   /skills           List available skills
@@ -46,6 +53,15 @@ Slash commands in REPL:
   /tasks delete <id>         Delete a task
   /tasks get <id>            Show full task details
   /tasks clear               Delete all tasks
+  /checkpoint       List checkpoints or restore one (/checkpoint restore <id>)
+  /rewind [id]      Rewind conversation to a checkpoint
+  /plan <desc>      Enter plan mode (write-protect everything except plan file)
+  /plan done        Exit plan mode and restore permissions
+  /plan status      Show plan mode status
+  /brainstorm <topic>  Multi-persona iterative brainstorming session
+  /worker           Auto-implement tasks from todo_list.txt
+  /ssj              SSJ Developer Mode — power menu (brainstorm, debate, worker, review…)
+  /image [prompt]   Send clipboard image to vision model
   /voice            Record voice input, transcribe, and submit
   /voice status     Show available recording and STT backends
   /voice lang <code>  Set STT language (e.g. zh, en, ja — default: auto)
@@ -59,7 +75,7 @@ Slash commands in REPL:
   /cloudsave load <gist_id>  Download and load a session from Gist
   /telegram <bot_token> <chat_id>  Start Telegram bridge
   /telegram stop|status             Stop or check Telegram bridge
-  /wechat <ilink_token>             Start WeChat bridge (iLink Bot API)
+  /wechat login                     Authenticate WeChat via QR code
   /wechat stop|status               Stop or check WeChat bridge
   /slack <token> <channel_id>       Start Slack bridge (Web API)
   /slack stop|status|logout         Stop, check, or clear Slack bridge
@@ -147,7 +163,7 @@ from tools import (
 # ── Live session context (replaces config["_run_query_callback"] etc.) ─────
 import runtime
 
-VERSION = "3.05.59"
+VERSION = "3.05.60"
 
 # ── Load feature modules from modular/ ecosystem ───────────────────────────
 # Commands from modular/ are merged into COMMANDS after the dict is built.
@@ -214,7 +230,7 @@ def _proactive_watcher_loop(config):
             last = config.get("_last_interaction_time", now)
             if now - last >= interval:
                 config["_last_interaction_time"] = now
-                cb = runtime.ctx.run_query
+                cb = runtime.get_session_ctx(config.get("_session_id", "default")).run_query
                 if cb:
                     cb(f"(System Automated Event) You have been inactive for {interval} seconds. "
                        "Before doing anything else, review your previous messages in this conversation. "
@@ -300,6 +316,26 @@ def _load_external_commands_into(commands_dict: dict) -> None:
         pass
 
 _load_external_commands_into(COMMANDS)
+
+
+def __getattr__(name: str):
+    """Module-level __getattr__ for backward-compatible access to modular attributes.
+
+    Exposes cmd_voice and _voice_language from modular/voice/cmd.py so that
+    external code and tests can access cheetahclaws.cmd_voice and
+    cheetahclaws._voice_language without the voice module being hard-coded here.
+    """
+    if name == "cmd_voice":
+        if "voice" in COMMANDS:
+            return COMMANDS["voice"]
+        return _missing_module_cmd("voice")
+    if name == "_voice_language":
+        try:
+            import modular.voice.cmd as _vc
+            return _vc._voice_language
+        except Exception:
+            return "auto"
+    raise AttributeError(f"module 'cheetahclaws' has no attribute {name!r}")
 
 
 def handle_slash(line: str, state, config) -> Union[bool, tuple]:
@@ -459,13 +495,17 @@ def repl(config: dict, initial_prompt: str = None):
     setup_readline(HISTORY_FILE)
     state = AgentState()
     verbose = config.get("verbose", False)
-    runtime.ctx.tg_send = _tg_send
-    runtime.ctx.agent_state = state
 
-    # ── Checkpoint system init ──
+    # Create the per-session RuntimeContext early so all wiring uses it, not
+    # the global singleton.  session_id must be set in config before any
+    # bridge or tool code runs so they can look up the right context.
     import checkpoint as ckpt
     session_id = uuid.uuid4().hex[:8]
     config["_session_id"] = session_id
+    session_ctx = runtime.get_session_ctx(session_id)
+    session_ctx.tg_send = _tg_send
+    session_ctx.agent_state = state
+
     ckpt.set_session(session_id)
     ckpt.cleanup_old_sessions()
     # Initial snapshot: capture the "blank slate" before any prompts
@@ -748,7 +788,7 @@ def repl(config: dict, initial_prompt: str = None):
 
         config["_last_interaction_time"] = time.time()
 
-    runtime.ctx.run_query = lambda msg: run_query(msg, is_background=True)
+    session_ctx.run_query = lambda msg: run_query(msg, is_background=True)
 
     def _handle_slash_from_telegram(line: str):
         """Process a /command from Telegram, handling sentinels inline.
@@ -775,7 +815,7 @@ def repl(config: dict, initial_prompt: str = None):
                 run_query(prompt)
         return "query"
 
-    runtime.ctx.handle_slash = _handle_slash_from_telegram
+    session_ctx.handle_slash = _handle_slash_from_telegram
 
     # ── Auto-start Telegram bridge if configured ──────────────────────
     if config.get("telegram_token") and config.get("telegram_chat_id"):
@@ -1239,6 +1279,11 @@ def main():
     from providers import detect_provider, PROVIDERS
 
     config = load_config()
+
+    # Explicit bootstrap: configure logging, ensure tool registry is ready,
+    # and start the optional health-check server.
+    from bootstrap import bootstrap as _bootstrap
+    _bootstrap(config)
 
     # Apply CLI overrides first (so key check uses the right provider)
     if args.model:

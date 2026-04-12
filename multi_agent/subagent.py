@@ -353,6 +353,10 @@ class SubAgentManager:
                     f"Commit your changes before finishing so they can be reviewed/merged.]"
                 )
                 prompt = prompt + notice
+                # Pass the worktree path through config so tools (Bash/Glob/Grep)
+                # use it as their working directory without touching the process-level
+                # cwd (which is shared across all threads).
+                eff_config["_worktree_cwd"] = worktree_path
             except Exception as e:
                 task.status = "failed"
                 task.result = f"Failed to create worktree: {e}"
@@ -361,11 +365,7 @@ class SubAgentManager:
         def _run():
             import agent as _agent_mod; AgentState = _agent_mod.AgentState
             task.status = "running"
-            old_cwd = os.getcwd()
             try:
-                if worktree_path:
-                    os.chdir(worktree_path)
-
                 state = AgentState()
                 gen = _agent_run(
                     prompt, state, eff_config, eff_system,
@@ -404,8 +404,7 @@ class SubAgentManager:
                 task.result = f"Error: {e}"
             finally:
                 if worktree_path:
-                    os.chdir(old_cwd)
-                    _remove_worktree(worktree_path, worktree_branch, old_cwd)
+                    _remove_worktree(worktree_path, worktree_branch, base_dir)
 
         task._future = self._pool.submit(_run)
         return task

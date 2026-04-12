@@ -1,56 +1,53 @@
-"""Tool definitions and implementations for CheetahClaws."""
-import json
-import os
-import re
-import glob as _glob
-import difflib
-import subprocess
-import threading
-from pathlib import Path
+"""Tool definitions and implementations for CheetahClaws.
+
+Implementations live in focused sub-modules:
+  tools_security.py     _check_path_allowed, _is_safe_bash
+  tools_fs.py           Read / Write / Edit / Glob + diff helpers
+  tools_shell.py        Bash / Grep
+  tools_web.py          WebFetch / WebSearch
+  tools_notebook.py     NotebookEdit
+  tools_diagnostics.py  GetDiagnostics
+  tools_interaction.py  AskUserQuestion / SleepTimer / bridge routing
+
+This module re-exports every public symbol for backward compatibility,
+holds the TOOL_SCHEMAS list, the execute_tool dispatcher, and calls
+_register_builtins() which wires all built-ins into the tool registry.
+"""
+from __future__ import annotations
+
 from typing import Callable, Optional
+
+# ── Re-exports (backward compat) ──────────────────────────────────────────
+
+from tools_security import _check_path_allowed, _is_safe_bash  # noqa: F401
+
+from tools_fs import (  # noqa: F401
+    _read, _write, _edit, _glob,
+    generate_unified_diff, maybe_truncate_diff,
+)
+
+from tools_shell import _bash, _grep, _kill_proc_tree, _has_rg  # noqa: F401
+
+from tools_web import _webfetch, _websearch  # noqa: F401
+
+from tools_notebook import _notebook_edit, _parse_cell_id  # noqa: F401
+
+from tools_diagnostics import (  # noqa: F401
+    _get_diagnostics, _detect_language, _run_quietly,
+)
+
+from tools_interaction import (  # noqa: F401
+    _tg_thread_local, _wx_thread_local, _slack_thread_local,
+    _is_in_tg_turn, _is_in_wx_turn, _is_in_slack_turn,
+    _ask_user_question, ask_input_interactive, drain_pending_questions,
+    _sleeptimer, _pending_questions, _ask_lock, _INPUT_WAIT_TIMEOUT,
+)
 
 from tool_registry import ToolDef, register_tool
 from tool_registry import execute_tool as _registry_execute
 
-# ── AskUserQuestion state ──────────────────────────────────────────────────────
-# The main REPL loop drains _pending_questions and fills _question_answers.
-_pending_questions: list[dict] = []   # [{id, question, options, allow_freetext, event, result_holder}]
-_ask_lock = threading.Lock()
 
-# ── Telegram turn detection (thread-local) ─────────────────────────────────
-# Using thread-local storage instead of a shared config key prevents race
-# conditions when slash commands run in their own daemon threads while the
-# Telegram poll loop and the main REPL loop continue on other threads.
-_tg_thread_local = threading.local()
-
-
-def _is_in_tg_turn(config: dict) -> bool:
-    """Return True if the *current thread* is handling a Telegram interaction.
-
-    Checks the thread-local flag first (set by the slash-command runner thread),
-    then falls back to the config key (set by the main REPL for _bg_runner turns).
-    """
-    return getattr(_tg_thread_local, "active", False) or bool(config.get("_in_telegram_turn", False))
-
-
-# ── WeChat turn detection (thread-local) ───────────────────────────────────
-_wx_thread_local = threading.local()
-
-
-def _is_in_wx_turn(config: dict) -> bool:
-    """Return True if the *current thread* is handling a WeChat interaction."""
-    return getattr(_wx_thread_local, "active", False) or bool(config.get("_in_wechat_turn", False))
-
-
-# ── Slack turn detection (thread-local) ────────────────────────────────────
-_slack_thread_local = threading.local()
-
-
-def _is_in_slack_turn(config: dict) -> bool:
-    """Return True if the *current thread* is handling a Slack interaction."""
-    return getattr(_slack_thread_local, "active", False) or bool(config.get("_in_slack_turn", False))
-
-# ── Tool JSON schemas (sent to Claude API) ─────────────────────────────────
+# ── Tool JSON schemas (sent to the LLM API) ───────────────────────────────
 
 TOOL_SCHEMAS = [
     {
@@ -128,16 +125,16 @@ TOOL_SCHEMAS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "pattern":      {"type": "string", "description": "Regex pattern"},
-                "path":         {"type": "string", "description": "File or directory to search"},
-                "glob":         {"type": "string", "description": "File filter e.g. *.py"},
-                "output_mode":  {
+                "pattern":          {"type": "string", "description": "Regex pattern"},
+                "path":             {"type": "string", "description": "File or directory to search"},
+                "glob":             {"type": "string", "description": "File filter e.g. *.py"},
+                "output_mode":      {
                     "type": "string",
                     "enum": ["content", "files_with_matches", "count"],
                     "description": "content=matching lines, files_with_matches=file paths, count=match counts",
                 },
                 "case_insensitive": {"type": "boolean"},
-                "context":      {"type": "integer", "description": "Lines of context around matches"},
+                "context":          {"type": "integer", "description": "Lines of context around matches"},
             },
             "required": ["pattern"],
         },
@@ -165,7 +162,6 @@ TOOL_SCHEMAS = [
             "required": ["query"],
         },
     },
-    # ── Task tools (schemas also listed here for Claude's tool list) ──────────
     {
         "name": "TaskCreate",
         "description": (
@@ -194,15 +190,15 @@ TOOL_SCHEMAS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "task_id":       {"type": "string"},
-                "subject":       {"type": "string"},
-                "description":   {"type": "string"},
-                "status":        {"type": "string", "enum": ["pending","in_progress","completed","cancelled","deleted"]},
-                "active_form":   {"type": "string"},
-                "owner":         {"type": "string"},
-                "add_blocks":    {"type": "array", "items": {"type": "string"}},
-                "add_blocked_by":{"type": "array", "items": {"type": "string"}},
-                "metadata":      {"type": "object"},
+                "task_id":        {"type": "string"},
+                "subject":        {"type": "string"},
+                "description":    {"type": "string"},
+                "status":         {"type": "string", "enum": ["pending","in_progress","completed","cancelled","deleted"]},
+                "active_form":    {"type": "string"},
+                "owner":          {"type": "string"},
+                "add_blocks":     {"type": "array", "items": {"type": "string"}},
+                "add_blocked_by": {"type": "array", "items": {"type": "string"}},
+                "metadata":       {"type": "object"},
             },
             "required": ["task_id"],
         },
@@ -221,11 +217,7 @@ TOOL_SCHEMAS = [
     {
         "name": "TaskList",
         "description": "List all tasks with their status, owner, and pending blockers.",
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        },
+        "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
         "name": "NotebookEdit",
@@ -329,692 +321,19 @@ TOOL_SCHEMAS = [
     {
         "name": "SleepTimer",
         "description": (
-            "Schedule a silent background timer. When the timer finishes, it injects an automated prompt into the chat history: "
-            "'(System Automated Event): The timer has finished...' so you can seamlessly wake up and execute deferred monitoring tasks."
+            "Schedule a silent background timer. When the timer finishes, it injects an automated "
+            "prompt: '(System Automated Event): The timer has finished...' so you can wake up and "
+            "execute deferred monitoring tasks."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "seconds": {"type": "integer", "description": "Number of seconds to sleep before waking up."}
+                "seconds": {"type": "integer", "description": "Number of seconds to sleep before waking up."},
             },
             "required": ["seconds"],
         },
     },
 ]
-
-# ── Safe bash commands (never ask permission) ───────────────────────────────
-
-_SAFE_PREFIXES = (
-    "ls", "cat", "head", "tail", "wc", "pwd", "echo", "printf", "date",
-    "which", "type", "env", "printenv", "uname", "whoami", "id",
-    "git log", "git status", "git diff", "git show", "git branch",
-    "git remote", "git stash list", "git tag",
-    "find ", "grep ", "rg ", "ag ", "fd ",
-    "python ", "python3 ", "node ", "ruby ", "perl ",
-    "pip show", "pip list", "npm list", "cargo metadata",
-    "df ", "du ", "free ", "top -bn", "ps ",
-    "curl -I", "curl --head",
-)
-
-def _is_safe_bash(cmd: str) -> bool:
-    c = cmd.strip()
-    return any(c.startswith(p) for p in _SAFE_PREFIXES)
-
-
-# ── Diff helpers ──────────────────────────────────────────────────────────
-
-def generate_unified_diff(old, new, filename, context_lines=3):
-    old_lines = old.splitlines(keepends=True)
-    new_lines = new.splitlines(keepends=True)
-    diff = difflib.unified_diff(old_lines, new_lines,
-        fromfile=f"a/{filename}", tofile=f"b/{filename}", n=context_lines)
-    return "".join(diff)
-
-def maybe_truncate_diff(diff_text, max_lines=80):
-    lines = diff_text.splitlines()
-    if len(lines) <= max_lines:
-        return diff_text
-    shown = lines[:max_lines]
-    remaining = len(lines) - max_lines
-    return "\n".join(shown) + f"\n\n[... {remaining} more lines ...]"
-
-
-# ── Tool implementations ───────────────────────────────────────────────────
-
-def _read(file_path: str, limit: int = None, offset: int = None) -> str:
-    p = Path(file_path)
-    if not p.exists():
-        return f"Error: file not found: {file_path}"
-    if p.is_dir():
-        return f"Error: {file_path} is a directory"
-    try:
-        # Explicitly use utf-8 and newline="" to avoid encoding/line-ending mismatches
-        lines = p.read_text(encoding="utf-8", errors="replace", newline="").splitlines(keepends=True)
-        start = offset or 0
-        chunk = lines[start:start + limit] if limit else lines[start:]
-        if not chunk:
-            return "(empty file)"
-        # Use standard 6-char padding for line numbers, matching Claude's expected format
-        return "".join(f"{start + i + 1:6}\t{l}" for i, l in enumerate(chunk))
-    except Exception as e:
-        return f"Error: {e}"
-
-
-def _write(file_path: str, content: str) -> str:
-    p = Path(file_path)
-    try:
-        is_new = not p.exists()
-        # Ensure utf-8 and newline="" for reading existing content to generate diff
-        old_content = "" if is_new else p.read_text(encoding="utf-8", errors="replace", newline="")
-        p.parent.mkdir(parents=True, exist_ok=True)
-        # Always write as utf-8 with newline="" to prevent double CRLF on Windows
-        p.write_text(content, encoding="utf-8", newline="")
-        if is_new:
-            lc = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
-            return f"Created {file_path} ({lc} lines)"
-        filename = p.name
-        diff = generate_unified_diff(old_content, content, filename)
-        if not diff:
-            return f"No changes in {file_path}"
-        truncated = maybe_truncate_diff(diff)
-        return f"File updated — {file_path}:\n\n{truncated}"
-    except Exception as e:
-        return f"Error: {e}"
-
-
-def _edit(file_path: str, old_string: str, new_string: str, replace_all: bool = False) -> str:
-    p = Path(file_path)
-    if not p.exists():
-        return f"Error: file not found: {file_path}"
-    try:
-        # Read with newline="" to get original line endings
-        content = p.read_text(encoding="utf-8", errors="replace", newline="")
-        
-        # Detect original line endings: only treat as pure CRLF if every \n is part of \r\n
-        crlf_count = content.count("\r\n")
-        lf_count = content.count("\n")
-        is_pure_crlf = crlf_count > 0 and crlf_count == lf_count
-
-        # Normalize line endings to avoid \r\n vs \n mismatch during matching
-        content_norm = content.replace("\r\n", "\n")
-        old_norm = old_string.replace("\r\n", "\n")
-        new_norm = new_string.replace("\r\n", "\n")
-
-        count = content_norm.count(old_norm)
-        if count == 0:
-            return "Error: old_string not found in file. Please ensure EXACT match, including all exact leading spaces/indentation and trailing newlines."
-        if count > 1 and not replace_all:
-            return (f"Error: old_string appears {count} times. "
-                    "Provide more context to make it unique, or use replace_all=true.")
-
-        old_content_norm = content_norm
-        new_content_norm = content_norm.replace(old_norm, new_norm) if replace_all else \
-                           content_norm.replace(old_norm, new_norm, 1)
-
-        # Restore CRLF only for pure-CRLF files; mixed or LF-only files stay as LF
-        if is_pure_crlf:
-            final_content = new_content_norm.replace("\n", "\r\n")
-            old_content_final = content
-        else:
-            final_content = new_content_norm
-            old_content_final = content_norm
-                      
-        # Write with newline="" to prevent double CRLF translation on Windows
-        p.write_text(final_content, encoding="utf-8", newline="")
-        filename = p.name
-        diff = generate_unified_diff(old_content_final, final_content, filename)
-        return f"Changes applied to {filename}:\n\n{diff}"
-    except Exception as e:
-        return f"Error: {e}"
-
-
-def _kill_proc_tree(pid: int):
-    """Kill a process and all its children."""
-    import sys as _sys
-    if _sys.platform == "win32":
-        # taskkill /T kills the entire process tree on Windows
-        subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
-                       capture_output=True)
-    else:
-        import signal
-        try:
-            os.killpg(os.getpgid(pid), signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                pass
-
-
-def _bash(command: str, timeout: int = 30) -> str:
-    import sys as _sys
-    kwargs = dict(
-        shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, cwd=os.getcwd(),
-    )
-    # On Unix, create a process group so we can kill the whole tree.
-    # start_new_session=True is equivalent to setsid but safe in multithreaded code
-    # (preexec_fn=os.setsid can deadlock when other threads hold locks at fork time).
-    if _sys.platform != "win32":
-        kwargs["start_new_session"] = True
-    try:
-        proc = subprocess.Popen(command, **kwargs)
-        try:
-            stdout, stderr = proc.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            _kill_proc_tree(proc.pid)
-            proc.wait()
-            return f"Error: timed out after {timeout}s (process killed)"
-        out = stdout
-        if stderr:
-            out += ("\n" if out else "") + "[stderr]\n" + stderr
-        return out.strip() or "(no output)"
-    except Exception as e:
-        return f"Error: {e}"
-
-
-def _glob(pattern: str, path: str = None) -> str:
-    base = Path(path) if path else Path.cwd()
-    try:
-        matches = sorted(base.glob(pattern))
-        if not matches:
-            return "No files matched"
-        return "\n".join(str(m) for m in matches[:500])
-    except Exception as e:
-        return f"Error: {e}"
-
-
-def _has_rg() -> bool:
-    try:
-        subprocess.run(["rg", "--version"], capture_output=True, check=True)
-        return True
-    except Exception:
-        return False
-
-
-def _grep(pattern: str, path: str = None, glob: str = None,
-          output_mode: str = "files_with_matches",
-          case_insensitive: bool = False, context: int = 0) -> str:
-    use_rg = _has_rg()
-    cmd = ["rg" if use_rg else "grep", "--no-heading"]
-    if case_insensitive:
-        cmd.append("-i")
-    if output_mode == "files_with_matches":
-        cmd.append("-l")
-    elif output_mode == "count":
-        cmd.append("-c")
-    else:
-        cmd.append("-n")
-        if context:
-            cmd += ["-C", str(context)]
-    if glob:
-        cmd += (["--glob", glob] if use_rg else ["--include", glob])
-    cmd.append(pattern)
-    cmd.append(path or str(Path.cwd()))
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        out = r.stdout.strip()
-        return out[:20000] if out else "No matches found"
-    except Exception as e:
-        return f"Error: {e}"
-
-
-def _webfetch(url: str, prompt: str = None) -> str:
-    try:
-        import httpx
-        r = httpx.get(url, headers={"User-Agent": "NanoClaude/1.0"},
-                      timeout=30, follow_redirects=True)
-        r.raise_for_status()
-        ct = r.headers.get("content-type", "")
-        if "html" in ct:
-            text = re.sub(r"<script[^>]*>.*?</script>", "", r.text,
-                          flags=re.DOTALL | re.IGNORECASE)
-            text = re.sub(r"<style[^>]*>.*?</style>", "", text,
-                          flags=re.DOTALL | re.IGNORECASE)
-            text = re.sub(r"<[^>]+>", " ", text)
-            text = re.sub(r"\s+", " ", text).strip()
-        else:
-            text = r.text
-        return text[:25000]
-    except ImportError:
-        return "Error: httpx not installed — run: pip install httpx"
-    except Exception as e:
-        return f"Error: {e}"
-
-
-def _websearch(query: str) -> str:
-    try:
-        import httpx
-        url = "https://html.duckduckgo.com/html/"
-        r = httpx.get(url, params={"q": query},
-                      headers={"User-Agent": "Mozilla/5.0 (compatible)"},
-                      timeout=30, follow_redirects=True)
-        titles   = re.findall(r'class="result__title"[^>]*>.*?<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
-                               r.text, re.DOTALL)
-        snippets = re.findall(r'class="result__snippet"[^>]*>(.*?)</div>', r.text, re.DOTALL)
-        results = []
-        for i, (link, title) in enumerate(titles[:8]):
-            t = re.sub(r"<[^>]+>", "", title).strip()
-            s = re.sub(r"<[^>]+>", "", snippets[i]).strip() if i < len(snippets) else ""
-            results.append(f"**{t}**\n{link}\n{s}")
-        return "\n\n".join(results) if results else "No results found"
-    except ImportError:
-        return "Error: httpx not installed — run: pip install httpx"
-    except Exception as e:
-        return f"Error: {e}"
-
-
-# ── NotebookEdit implementation ────────────────────────────────────────────
-
-def _parse_cell_id(cell_id: str) -> int | None:
-    """Convert 'cell-N' shorthand to integer index; return None if not that form."""
-    m = re.fullmatch(r"cell-(\d+)", cell_id)
-    return int(m.group(1)) if m else None
-
-
-def _notebook_edit(
-    notebook_path: str,
-    new_source: str,
-    cell_id: str = None,
-    cell_type: str = None,
-    edit_mode: str = "replace",
-) -> str:
-    p = Path(notebook_path)
-    if p.suffix != ".ipynb":
-        return "Error: file must be a Jupyter notebook (.ipynb)"
-    if not p.exists():
-        return f"Error: notebook not found: {notebook_path}"
-
-    try:
-        nb = json.loads(p.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as e:
-        return f"Error: notebook is not valid JSON: {e}"
-
-    cells = nb.get("cells", [])
-
-    # Resolve cell index
-    def _resolve_index(cid: str) -> int | None:
-        # Try exact id match first
-        for i, c in enumerate(cells):
-            if c.get("id") == cid:
-                return i
-        # Fallback: cell-N
-        idx = _parse_cell_id(cid)
-        if idx is not None and 0 <= idx < len(cells):
-            return idx
-        return None
-
-    if edit_mode == "replace":
-        if not cell_id:
-            return "Error: cell_id is required for replace"
-        idx = _resolve_index(cell_id)
-        if idx is None:
-            return f"Error: cell '{cell_id}' not found"
-        target = cells[idx]
-        target["source"] = new_source
-        if cell_type and cell_type != target.get("cell_type"):
-            target["cell_type"] = cell_type
-        if target.get("cell_type") == "code":
-            target["execution_count"] = None
-            target["outputs"] = []
-
-    elif edit_mode == "insert":
-        if not cell_type:
-            return "Error: cell_type is required for insert ('code' or 'markdown')"
-        # Determine nb format for cell ids
-        nbformat = nb.get("nbformat", 4)
-        nbformat_minor = nb.get("nbformat_minor", 0)
-        use_ids = nbformat > 4 or (nbformat == 4 and nbformat_minor >= 5)
-        new_id = None
-        if use_ids:
-            import random, string
-            new_id = "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
-
-        if cell_type == "markdown":
-            new_cell = {"cell_type": "markdown", "source": new_source, "metadata": {}}
-        else:
-            new_cell = {
-                "cell_type": "code",
-                "source": new_source,
-                "metadata": {},
-                "execution_count": None,
-                "outputs": [],
-            }
-        if use_ids and new_id:
-            new_cell["id"] = new_id
-
-        if cell_id:
-            idx = _resolve_index(cell_id)
-            if idx is None:
-                return f"Error: cell '{cell_id}' not found"
-            cells.insert(idx + 1, new_cell)
-        else:
-            cells.insert(0, new_cell)
-        nb["cells"] = cells
-        cell_id = new_id or cell_id
-
-    elif edit_mode == "delete":
-        if not cell_id:
-            return "Error: cell_id is required for delete"
-        idx = _resolve_index(cell_id)
-        if idx is None:
-            return f"Error: cell '{cell_id}' not found"
-        cells.pop(idx)
-        nb["cells"] = cells
-        p.write_text(json.dumps(nb, indent=1, ensure_ascii=False), encoding="utf-8")
-        return f"Deleted cell '{cell_id}' from {notebook_path}"
-    else:
-        return f"Error: unknown edit_mode '{edit_mode}' — use replace, insert, or delete"
-
-    nb["cells"] = cells
-    p.write_text(json.dumps(nb, indent=1, ensure_ascii=False), encoding="utf-8")
-    return f"NotebookEdit({edit_mode}) applied to cell '{cell_id}' in {notebook_path}"
-
-
-# ── GetDiagnostics implementation ──────────────────────────────────────────
-
-def _detect_language(file_path: str) -> str:
-    ext = Path(file_path).suffix.lower()
-    return {
-        ".py":   "python",
-        ".js":   "javascript",
-        ".mjs":  "javascript",
-        ".cjs":  "javascript",
-        ".ts":   "typescript",
-        ".tsx":  "typescript",
-        ".sh":   "shellscript",
-        ".bash": "shellscript",
-        ".zsh":  "shellscript",
-    }.get(ext, "unknown")
-
-
-def _run_quietly(cmd: list[str], cwd: str | None = None, timeout: int = 30) -> tuple[int, str]:
-    """Run a command, return (returncode, combined_output)."""
-    try:
-        r = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout,
-            cwd=cwd or os.getcwd(),
-        )
-        out = (r.stdout + ("\n" + r.stderr if r.stderr else "")).strip()
-        return r.returncode, out
-    except FileNotFoundError:
-        return -1, f"(command not found: {cmd[0]})"
-    except subprocess.TimeoutExpired:
-        return -1, f"(timed out after {timeout}s)"
-    except Exception as e:
-        return -1, f"(error: {e})"
-
-
-def _get_diagnostics(file_path: str, language: str = None) -> str:
-    p = Path(file_path)
-    if not p.exists():
-        return f"Error: file not found: {file_path}"
-
-    lang = language or _detect_language(file_path)
-    abs_path = str(p.resolve())
-    results: list[str] = []
-
-    if lang == "python":
-        # Try pyright first (most comprehensive)
-        rc, out = _run_quietly(["pyright", "--outputjson", abs_path])
-        if rc != -1:
-            try:
-                data = json.loads(out)
-                diags = data.get("generalDiagnostics", [])
-                if not diags:
-                    results.append("pyright: no diagnostics")
-                else:
-                    lines = [f"pyright ({len(diags)} issue(s)):"]
-                    for d in diags[:50]:
-                        rng = d.get("range", {}).get("start", {})
-                        ln = rng.get("line", 0) + 1
-                        ch = rng.get("character", 0) + 1
-                        sev = d.get("severity", "error")
-                        msg = d.get("message", "")
-                        rule = d.get("rule", "")
-                        lines.append(f"  {ln}:{ch} [{sev}] {msg}" + (f" ({rule})" if rule else ""))
-                    results.append("\n".join(lines))
-            except json.JSONDecodeError:
-                if out:
-                    results.append(f"pyright:\n{out[:3000]}")
-        else:
-            # Try mypy
-            rc2, out2 = _run_quietly(["mypy", "--no-error-summary", abs_path])
-            if rc2 != -1:
-                results.append(f"mypy:\n{out2[:3000]}" if out2 else "mypy: no diagnostics")
-            else:
-                # Fall back to flake8
-                rc3, out3 = _run_quietly(["flake8", abs_path])
-                if rc3 != -1:
-                    results.append(f"flake8:\n{out3[:3000]}" if out3 else "flake8: no diagnostics")
-                else:
-                    # Last resort: py_compile syntax check
-                    rc4, out4 = _run_quietly(["python3", "-m", "py_compile", abs_path])
-                    if out4:
-                        results.append(f"py_compile (syntax check):\n{out4}")
-                    else:
-                        results.append("py_compile: syntax OK (no further tools available)")
-
-    elif lang in ("javascript", "typescript"):
-        # Try tsc
-        rc, out = _run_quietly(["tsc", "--noEmit", "--strict", abs_path])
-        if rc != -1:
-            results.append(f"tsc:\n{out[:3000]}" if out else "tsc: no errors")
-        else:
-            # Try eslint
-            rc2, out2 = _run_quietly(["eslint", abs_path])
-            if rc2 != -1:
-                results.append(f"eslint:\n{out2[:3000]}" if out2 else "eslint: no issues")
-            else:
-                results.append("No TypeScript/JavaScript checker found (install tsc or eslint)")
-
-    elif lang == "shellscript":
-        rc, out = _run_quietly(["shellcheck", abs_path])
-        if rc != -1:
-            results.append(f"shellcheck:\n{out[:3000]}" if out else "shellcheck: no issues")
-        else:
-            # Basic bash syntax check
-            rc2, out2 = _run_quietly(["bash", "-n", abs_path])
-            results.append(f"bash -n (syntax check):\n{out2}" if out2 else "bash -n: syntax OK")
-
-    else:
-        results.append(f"No diagnostic tool available for language: {lang or 'unknown'} (ext: {Path(file_path).suffix})")
-
-    return "\n\n".join(results) if results else "(no diagnostics output)"
-
-
-# ── AskUserQuestion implementation ────────────────────────────────────────
-
-def _ask_user_question(
-    question: str,
-    options: list[dict] | None = None,
-    allow_freetext: bool = True,
-) -> str:
-    """
-    Block the agent loop and surface a question to the user in the terminal.
-
-    The REPL loop (cheetahclaws.py) periodically calls drain_pending_questions()
-    to render any questions and collect answers.  We use a threading.Event to
-    block this call until the user responds.
-    """
-    event = threading.Event()
-    result_holder: list[str] = []
-    entry = {
-        "question": question,
-        "options": options or [],
-        "allow_freetext": allow_freetext,
-        "event": event,
-        "result": result_holder,
-    }
-    with _ask_lock:
-        _pending_questions.append(entry)
-
-    # Block until the REPL answers us
-    event.wait(timeout=300)  # 5-minute max wait
-
-    if result_holder:
-        return result_holder[0]
-    return "(no answer — timeout)"
-
-
-def ask_input_interactive(prompt: str, config: dict, menu_text: str = None) -> str:
-    """Prompt the user for input, routing to Telegram/WeChat/Slack if in a remote turn.
-    If menu_text is provided, it is sent ahead of the prompt."""
-    import re as _re_inner, threading as _threading_inner
-    # ── Slack routing ──
-    is_slack = _is_in_slack_turn(config)
-    import runtime as _runtime
-    if is_slack and _runtime.ctx.slack_send is not None:
-        clean_prompt = _re_inner.sub(r'\x1b\[[0-9;]*m', '', prompt).strip()
-        payload = ""
-        if menu_text:
-            clean_menu = _re_inner.sub(r'\x1b\[[0-9;]*m', '', menu_text).strip()
-            payload += f"{clean_menu}\n\n"
-        payload += f"❓ Input Required\n{clean_prompt}"
-        slack_channel = config.get("_slack_current_channel") or config.get("slack_channel", "")
-        _runtime.ctx.slack_send(slack_channel, payload)
-        evt = _threading_inner.Event()
-        _runtime.ctx.slack_input_event = evt
-        evt.wait()
-        text = _runtime.ctx.slack_input_value.strip()
-        _runtime.ctx.slack_input_event = None
-        _runtime.ctx.slack_input_value = ""
-        return text
-    # ── WeChat routing ──
-    is_wx = _is_in_wx_turn(config)
-    if is_wx and _runtime.ctx.wx_send is not None:
-        clean_prompt = _re_inner.sub(r'\x1b\[[0-9;]*m', '', prompt).strip()
-        payload = ""
-        if menu_text:
-            clean_menu = _re_inner.sub(r'\x1b\[[0-9;]*m', '', menu_text).strip()
-            payload += f"{clean_menu}\n\n"
-        payload += f"❓ 需要输入\n{clean_prompt}"
-        wx_user_id = config.get("_wx_current_user_id", "")
-        _runtime.ctx.wx_send(wx_user_id, payload)
-        evt = _threading_inner.Event()
-        _runtime.ctx.wx_input_event = evt
-        evt.wait()
-        text = _runtime.ctx.wx_input_value.strip()
-        _runtime.ctx.wx_input_event = None
-        _runtime.ctx.wx_input_value = ""
-        return text
-    # ── Telegram routing ──
-    is_tg = _is_in_tg_turn(config)
-    import runtime as _runtime
-    if is_tg and _runtime.ctx.tg_send is not None:
-        token = config.get("telegram_token")
-        chat_id = config.get("telegram_chat_id")
-        import re, threading
-        clean_prompt = re.sub(r'\x1b\[[0-9;]*m', '', prompt).strip()
-
-        payload = ""
-        if menu_text:
-            clean_menu = re.sub(r'\x1b\[[0-9;]*m', '', menu_text).strip()
-            payload += f"{clean_menu}\n\n"
-        payload += f"❓ *Input Required*\n{clean_prompt}"
-
-        _runtime.ctx.tg_send(token, chat_id, payload)
-
-        evt = threading.Event()
-        _runtime.ctx.tg_input_event = evt
-        evt.wait()
-        text = _runtime.ctx.tg_input_value.strip()
-        _runtime.ctx.tg_input_event = None
-        _runtime.ctx.tg_input_value = ""
-        return text
-    else:
-        try:
-            # Wrap ANSI escape sequences so readline accounts for them as
-            # zero-width — fixes cursor drift and duplicate-line scrollback (#29/#31).
-            import re as _re
-            rl_prompt = _re.sub(r'(\x1b\[[0-9;]*m)', r'\001\1\002', prompt)
-            return input(rl_prompt)
-        except (KeyboardInterrupt, EOFError):
-            print()
-            return ""
-
-def drain_pending_questions(config: dict) -> bool:
-    """
-    Called by the REPL loop after each streaming turn.
-    Renders pending questions and collects user input.
-    Returns True if any questions were answered.
-    """
-    with _ask_lock:
-        pending = list(_pending_questions)
-        _pending_questions.clear()
-
-    if not pending:
-        return False
-
-    for entry in pending:
-        question = entry["question"]
-        options  = entry["options"]
-        allow_ft = entry["allow_freetext"]
-        event    = entry["event"]
-        result   = entry["result"]
-
-        print()
-        print("\033[1;35m❓ Question from assistant:\033[0m")
-        print(f"   {question}")
-
-        if options:
-            print()
-            for i, opt in enumerate(options, 1):
-                label = opt.get("label", "")
-                desc  = opt.get("description", "")
-                line  = f"  [{i}] {label}"
-                if desc:
-                    line += f" — {desc}"
-                print(line)
-            if allow_ft:
-                print("  [0] Type a custom answer")
-            print()
-
-            while True:
-                raw = ask_input_interactive("Your choice (number or text): ", config).strip()
-                if not raw:
-                    break
-
-                if raw.isdigit():
-                    idx = int(raw)
-                    if 1 <= idx <= len(options):
-                        raw = options[idx - 1]["label"]
-                        break
-                    elif idx == 0 and allow_ft:
-                        raw = ask_input_interactive("Your answer: ", config).strip()
-                        break
-                    else:
-                        print(f"Invalid option: {idx}")
-                        raw = ""
-                        continue
-                elif allow_ft:
-                    break  # accept free text directly
-        else:
-            # Free-text only
-            print()
-            raw = ask_input_interactive("Your answer: ", config).strip()
-
-        result.append(raw)
-        event.set()
-
-    return True
-
-
-def _sleeptimer(seconds: int, config: dict) -> str:
-    import threading
-    import runtime
-    cb = runtime.ctx.run_query
-    if not cb:
-        return "Error: No active REPL session (runtime.ctx.run_query not set)"
-        
-    def worker():
-        import time
-        time.sleep(seconds)
-        cb("(System Automated Event): The timer has finished. Please wake up, perform any pending monitoring checks and report to the user now.")
-        
-    t = threading.Thread(target=worker, daemon=True)
-    t.start()
-    return f"Timer successfully scheduled for {seconds} seconds. You can output your final thoughts and end your turn. You will be automatically awakened."
 
 
 # ── Dispatcher (backward-compatible wrapper) ──────────────────────────────
@@ -1026,23 +345,16 @@ def execute_tool(
     ask_permission: Optional[Callable[[str], bool]] = None,
     config: dict = None,
 ) -> str:
-    """Dispatch tool execution; ask permission for write/destructive ops.
-
-    Permission checking is done here, then delegation goes to the registry.
-    The config dict is forwarded to tool functions so they can access
-    runtime context like _depth, _system_prompt, model, etc.
-    """
+    """Dispatch tool execution; ask permission for write/destructive ops."""
     cfg = config or {}
 
     def _check(desc: str) -> bool:
-        """Return True if action is allowed."""
         if permission_mode == "accept-all":
             return True
         if ask_permission:
             return ask_permission(desc)
-        return True  # headless: allow everything
+        return True
 
-    # --- permission gate ---
     if name == "Write":
         if not _check(f"Write to {inputs['file_path']}"):
             return "Denied: user rejected write operation"
@@ -1065,44 +377,43 @@ def execute_tool(
 
 def _register_builtins() -> None:
     """Register all built-in tools into the central registry."""
-    # Use a name → schema map so ordering changes in TOOL_SCHEMAS never break this.
     _schemas = {s["name"]: s for s in TOOL_SCHEMAS}
 
     _tool_defs = [
         ToolDef(
             name="Read",
             schema=_schemas["Read"],
-            func=lambda p, c: _read(**p),
-            read_only=True,
-            concurrent_safe=True,
+            func=lambda p, c: _check_path_allowed(p["file_path"], c) or _read(**p),
+            read_only=True, concurrent_safe=True,
         ),
         ToolDef(
             name="Write",
             schema=_schemas["Write"],
-            func=lambda p, c: _write(**p),
-            read_only=False,
-            concurrent_safe=False,
+            func=lambda p, c: _check_path_allowed(p["file_path"], c) or _write(**p),
+            read_only=False, concurrent_safe=False,
         ),
         ToolDef(
             name="Edit",
             schema=_schemas["Edit"],
-            func=lambda p, c: _edit(**p),
-            read_only=False,
-            concurrent_safe=False,
+            func=lambda p, c: _check_path_allowed(p["file_path"], c) or _edit(**p),
+            read_only=False, concurrent_safe=False,
         ),
         ToolDef(
             name="Bash",
             schema=_schemas["Bash"],
-            func=lambda p, c: _bash(p["command"], p.get("timeout", 30)),
-            read_only=False,
-            concurrent_safe=False,
+            func=lambda p, c: _bash(
+                p["command"], p.get("timeout", 30),
+                c.get("_worktree_cwd"),
+                c.get("shell_policy", "allow"),
+                c.get("_session_id", "default"),
+            ),
+            read_only=False, concurrent_safe=False,
         ),
         ToolDef(
             name="Glob",
             schema=_schemas["Glob"],
-            func=lambda p, c: _glob(p["pattern"], p.get("path")),
-            read_only=True,
-            concurrent_safe=True,
+            func=lambda p, c: _glob(p["pattern"], p.get("path"), c.get("_worktree_cwd")),
+            read_only=True, concurrent_safe=True,
         ),
         ToolDef(
             name="Grep",
@@ -1112,64 +423,51 @@ def _register_builtins() -> None:
                 p.get("output_mode", "files_with_matches"),
                 p.get("case_insensitive", False),
                 p.get("context", 0),
+                c.get("_worktree_cwd"),
             ),
-            read_only=True,
-            concurrent_safe=True,
+            read_only=True, concurrent_safe=True,
         ),
         ToolDef(
             name="WebFetch",
             schema=_schemas["WebFetch"],
             func=lambda p, c: _webfetch(p["url"], p.get("prompt")),
-            read_only=True,
-            concurrent_safe=True,
+            read_only=True, concurrent_safe=True,
         ),
         ToolDef(
             name="WebSearch",
             schema=_schemas["WebSearch"],
             func=lambda p, c: _websearch(p["query"]),
-            read_only=True,
-            concurrent_safe=True,
+            read_only=True, concurrent_safe=True,
         ),
         ToolDef(
             name="NotebookEdit",
             schema=_schemas["NotebookEdit"],
             func=lambda p, c: _notebook_edit(
-                p["notebook_path"],
-                p["new_source"],
-                p.get("cell_id"),
-                p.get("cell_type"),
+                p["notebook_path"], p["new_source"],
+                p.get("cell_id"), p.get("cell_type"),
                 p.get("edit_mode", "replace"),
             ),
-            read_only=False,
-            concurrent_safe=False,
+            read_only=False, concurrent_safe=False,
         ),
         ToolDef(
             name="GetDiagnostics",
             schema=_schemas["GetDiagnostics"],
-            func=lambda p, c: _get_diagnostics(
-                p["file_path"],
-                p.get("language"),
-            ),
-            read_only=True,
-            concurrent_safe=True,
+            func=lambda p, c: _get_diagnostics(p["file_path"], p.get("language")),
+            read_only=True, concurrent_safe=True,
         ),
         ToolDef(
             name="AskUserQuestion",
             schema=_schemas["AskUserQuestion"],
             func=lambda p, c: _ask_user_question(
-                p["question"],
-                p.get("options"),
-                p.get("allow_freetext", True),
+                p["question"], p.get("options"), p.get("allow_freetext", True),
             ),
-            read_only=True,
-            concurrent_safe=False,
+            read_only=True, concurrent_safe=False,
         ),
         ToolDef(
             name="SleepTimer",
             schema=_schemas["SleepTimer"],
             func=lambda p, c: _sleeptimer(p["seconds"], c),
-            read_only=False,
-            concurrent_safe=True,
+            read_only=False, concurrent_safe=True,
         ),
     ]
     for td in _tool_defs:
@@ -1179,61 +477,40 @@ def _register_builtins() -> None:
 _register_builtins()
 
 
-# ── Memory tools (MemorySave, MemoryDelete, MemorySearch, MemoryList) ────────
-# Defined in memory/tools.py; importing registers them automatically.
-import memory.tools as _memory_tools  # noqa: F401
+# ── Extension tools (side-effect imports register them automatically) ─────
 
-
-
-# ── Multi-agent tools (Agent, SendMessage, CheckAgentResult, ListAgentTasks, ListAgentTypes) ──
-# Defined in multi_agent/tools.py; importing registers them automatically.
+import memory.tools      as _memory_tools      # noqa: F401
 import multi_agent.tools as _multiagent_tools  # noqa: F401
 
-# Expose get_agent_manager at module level for backward compatibility
 from multi_agent.tools import get_agent_manager as _get_agent_manager  # noqa: F401
 
-
-# ── Skill tools (Skill, SkillList) ────────────────────────────────────────
-# Defined in skill/tools.py; importing registers them automatically.
 import skill.tools as _skill_tools  # noqa: F401
+import mcp.tools   as _mcp_tools    # noqa: F401
 
-
-# ── MCP tools ─────────────────────────────────────────────────────────────────
-# mcp/tools.py connects to configured MCP servers and registers their tools.
-# Connection happens in a background thread so startup is not blocked.
-import mcp.tools as _mcp_tools  # noqa: F401
-
-
-# ── Plugin tools ───────────────────────────────────────────────────────────────
-# Load tools contributed by installed+enabled plugins.
 try:
     from plugin.loader import register_plugin_tools as _reg_plugin_tools
     _reg_plugin_tools()
-except Exception as _plugin_err:
-    pass  # Plugin loading is best-effort; never crash startup
+except Exception:
+    pass   # Plugin loading is best-effort; never crash startup
 
-
-# ── Task tools (TaskCreate, TaskUpdate, TaskGet, TaskList) ─────────────────────
-# task/tools.py registers all four tools into the central registry on import.
 import task.tools as _task_tools  # noqa: F401
 
-
-# ── Checkpoint hooks (backup files before Write/Edit/NotebookEdit) ───────────
 from checkpoint.hooks import install_hooks as _install_checkpoint_hooks
 _install_checkpoint_hooks()
 
+# ── Plan mode tools (EnterPlanMode / ExitPlanMode) ────────────────────────
 
-# ── Plan mode tools (EnterPlanMode / ExitPlanMode) ──────────────────────────
+from pathlib import Path as _Path
+
 
 def _enter_plan_mode(params: dict, config: dict) -> str:
-    """Enter plan mode: read-only except plan file."""
     if config.get("permission_mode") == "plan":
         return "Already in plan mode. Write your plan to the plan file, then call ExitPlanMode."
 
     session_id = config.get("_session_id", "default")
-    plans_dir = Path.cwd() / ".nano_claude" / "plans"
+    plans_dir  = _Path(config.get("_worktree_cwd") or _Path.cwd()) / ".nano_claude" / "plans"
     plans_dir.mkdir(parents=True, exist_ok=True)
-    plan_path = plans_dir / f"{session_id}.md"
+    plan_path  = plans_dir / f"{session_id}.md"
 
     task_desc = params.get("task_description", "")
     if not plan_path.exists() or plan_path.stat().st_size == 0:
@@ -1241,101 +518,70 @@ def _enter_plan_mode(params: dict, config: dict) -> str:
         plan_path.write_text(header, encoding="utf-8")
 
     config["_prev_permission_mode"] = config.get("permission_mode", "auto")
-    config["permission_mode"] = "plan"
-    config["_plan_file"] = str(plan_path)
-
+    config["permission_mode"]        = "plan"
+    config["_plan_file"]             = str(plan_path)
     return (
-        f"Plan mode activated. You are now in read-only mode.\n"
-        f"Plan file: {plan_path}\n\n"
-        f"Instructions:\n"
-        f"1. Analyze the codebase using Read, Glob, Grep, WebSearch\n"
-        f"2. Write your detailed implementation plan to the plan file using Write or Edit\n"
-        f"3. When the plan is ready, call ExitPlanMode to request user approval\n"
-        f"4. Do NOT attempt to write to any other files — they will be blocked"
+        f"Plan mode activated. Plan file: {plan_path}\n"
+        "Write your step-by-step plan to the plan file, then call ExitPlanMode when ready to implement."
     )
 
 
 def _exit_plan_mode(params: dict, config: dict) -> str:
-    """Exit plan mode and present plan for user approval."""
     if config.get("permission_mode") != "plan":
-        return "Not in plan mode. Use EnterPlanMode first."
-
+        return "Not in plan mode."
     plan_file = config.get("_plan_file", "")
     plan_content = ""
     if plan_file:
-        p = Path(plan_file)
-        if p.exists():
-            plan_content = p.read_text(encoding="utf-8").strip()
+        try:
+            plan_content = _Path(plan_file).read_text(encoding="utf-8").strip()
+        except Exception:
+            plan_content = ""
 
-    if not plan_content or plan_content == "# Plan":
-        return "Plan file is empty. Write your plan to the plan file before calling ExitPlanMode."
+    # Reject if plan file is effectively empty (only whitespace / top-level title)
+    # A top-level title is exactly "# ..." (single #).  ## sections count as content.
+    non_trivial_lines = [
+        l for l in plan_content.splitlines()
+        if l.strip() and not (l.strip().startswith("# ") and not l.strip().startswith("## "))
+    ]
+    if not non_trivial_lines:
+        return (
+            "Plan is empty — please write your step-by-step plan to the plan file "
+            f"({plan_file}) before exiting plan mode."
+        )
 
-    # Restore permissions
-    prev = config.pop("_prev_permission_mode", "auto")
-    config["permission_mode"] = prev
-
+    config["permission_mode"] = config.pop("_prev_permission_mode", "auto")
+    config.pop("_plan_file", None)
     return (
-        f"Plan mode exited. Permission mode restored to: {prev}\n"
-        f"Plan file: {plan_file}\n\n"
-        f"The plan is ready for the user to review. "
-        f"Wait for the user to approve before starting implementation.\n\n"
-        f"--- Plan Content ---\n{plan_content}"
+        f"Plan mode exited. Resuming normal permissions.\n\n"
+        f"Plan content:\n{plan_content}\n\n"
+        "Wait for the user to approve the plan before executing any steps."
     )
 
 
-_PLAN_MODE_SCHEMAS = [
-    {
-        "name": "EnterPlanMode",
-        "description": (
-            "Enter plan mode to analyze the codebase and create an implementation plan "
-            "before writing code. Use this for complex, multi-file tasks. "
-            "In plan mode, only the plan file is writable; all other writes are blocked."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "task_description": {
-                    "type": "string",
-                    "description": "Brief description of the task to plan for",
-                },
+_plan_schema_enter = {
+    "name": "EnterPlanMode",
+    "description": (
+        "Switch to plan mode: read-only except for writing the plan file. "
+        "Use this to analyze a task and write a step-by-step plan before executing."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "task_description": {
+                "type": "string",
+                "description": "Brief description of what you plan to do",
             },
-            "required": [],
         },
+        "required": [],
     },
-    {
-        "name": "ExitPlanMode",
-        "description": (
-            "Exit plan mode and present the plan for user approval. "
-            "Call this after writing your implementation plan to the plan file. "
-            "The user must approve the plan before you begin implementation."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        },
-    },
-]
+}
+_plan_schema_exit = {
+    "name": "ExitPlanMode",
+    "description": "Exit plan mode and return to normal permissions to begin executing the plan.",
+    "input_schema": {"type": "object", "properties": {}, "required": []},
+}
 
-register_tool(ToolDef(
-    name="EnterPlanMode",
-    schema=_PLAN_MODE_SCHEMAS[0],
-    func=_enter_plan_mode,
-    read_only=False,
-    concurrent_safe=False,
-))
-
-register_tool(ToolDef(
-    name="ExitPlanMode",
-    schema=_PLAN_MODE_SCHEMAS[1],
-    func=_exit_plan_mode,
-    read_only=False,
-    concurrent_safe=False,
-))
-
-# ── Tmux tools (auto-detected: only registered when tmux is on the system) ───
-try:
-    from tmux_tools import register_tmux_tools
-    _tmux_count = register_tmux_tools()
-except ImportError:
-    _tmux_count = 0
+register_tool(ToolDef("EnterPlanMode", _plan_schema_enter, _enter_plan_mode,
+                       read_only=True, concurrent_safe=False))
+register_tool(ToolDef("ExitPlanMode",  _plan_schema_exit,  _exit_plan_mode,
+                       read_only=False, concurrent_safe=False))

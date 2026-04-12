@@ -13,6 +13,7 @@ import threading
 
 from ui.render import clr, info, ok, warn, err
 import runtime
+import logging_utils as _log
 
 _telegram_thread: threading.Thread | None = None
 _telegram_stop = threading.Event()
@@ -55,10 +56,17 @@ def _tg_typing_loop(token: str, chat_id: int, stop_event: threading.Event):
 
 # ── Poll loop ──────────────────────────────────────────────────────────────
 
-def _tg_poll_loop(token: str, chat_id: int, config: dict):
-    """Long-polling loop that reads Telegram messages and feeds them to run_query."""
+def _tg_poll_loop(token: str, chat_id: int, config: dict) -> str:
+    """Long-polling loop that reads Telegram messages and feeds them to run_query.
+
+    Returns:
+      "stopped"    — clean stop via _telegram_stop or /stop command
+      "auth_error" — token rejected by Telegram (don't reconnect)
+    Raises on unexpected fatal errors so the supervisor can reconnect.
+    """
     from tools import _tg_thread_local
-    run_query_cb = runtime.ctx.run_query
+    session_ctx = runtime.get_session_ctx(config.get("_session_id", "default"))
+    run_query_cb = session_ctx.run_query
     # Flush old messages
     flush = _tg_api(token, "getUpdates", {"offset": -1, "timeout": 0})
     if flush and flush.get("ok") and flush.get("result"):
@@ -75,6 +83,12 @@ def _tg_poll_loop(token: str, chat_id: int, config: dict):
                 "allowed_updates": ["message"]
             })
             if not result or not result.get("ok"):
+                if result:
+                    tg_err = result.get("error_code")
+                    desc   = result.get("description", "")
+                    if tg_err == 401 or "unauthorized" in desc.lower():
+                        _log.warn("bridge_auth_error", bridge="telegram", description=desc[:100])
+                        return "auth_error"
                 _telegram_stop.wait(5)
                 continue
 
@@ -152,9 +166,9 @@ def _tg_poll_loop(token: str, chat_id: int, config: dict):
                     continue
 
                 # Intercept text if a permission prompt is waiting
-                evt = runtime.ctx.tg_input_event
+                evt = session_ctx.tg_input_event
                 if evt:
-                    runtime.ctx.tg_input_value = text
+                    session_ctx.tg_input_value = text
                     evt.set()
                     continue
 
@@ -168,7 +182,7 @@ def _tg_poll_loop(token: str, chat_id: int, config: dict):
                     elif tg_cmd == "/start":
                         _tg_send(token, chat_id, "🟢 cheetahclaws bridge is active. Send me anything.")
                         continue
-                    slash_cb = runtime.ctx.handle_slash
+                    slash_cb = session_ctx.handle_slash
                     if slash_cb:
                         def _slash_runner(_slash_text, _token, _chat_id):
                             _tg_thread_local.active = True
@@ -183,7 +197,7 @@ def _tg_poll_loop(token: str, chat_id: int, config: dict):
                                 cmd_name = _slash_text.strip().split()[0]
                                 _tg_send(_token, _chat_id, f"✅ {cmd_name} executed.")
                                 return
-                            tg_state = runtime.ctx.agent_state
+                            tg_state = session_ctx.agent_state
                             if tg_state and tg_state.messages:
                                 for m in reversed(tg_state.messages):
                                     if m.get("role") == "assistant":
@@ -220,7 +234,7 @@ def _tg_poll_loop(token: str, chat_id: int, config: dict):
 
                     _typing_stop.set()
 
-                    state = runtime.ctx.agent_state
+                    state = session_ctx.agent_state
                     if state and state.messages:
                         for m in reversed(state.messages):
                             if m.get("role") == "assistant":
@@ -242,7 +256,42 @@ def _tg_poll_loop(token: str, chat_id: int, config: dict):
         except Exception:
             _telegram_stop.wait(5)
 
+    return "stopped"
+
+
+# ── Supervisor (auto-reconnect) ────────────────────────────────────────────
+
+_TG_BACKOFF_INITIAL = 2.0
+_TG_BACKOFF_MAX     = 120.0
+
+
+def _tg_supervisor(token: str, chat_id: int, config: dict) -> None:
+    """Wrap _tg_poll_loop with exponential-backoff reconnect on unexpected exit."""
     global _telegram_thread
+    backoff = _TG_BACKOFF_INITIAL
+    attempt = 0
+    while not _telegram_stop.is_set():
+        attempt += 1
+        try:
+            reason = _tg_poll_loop(token, chat_id, config)
+        except Exception as exc:
+            if _telegram_stop.is_set():
+                break
+            _log.warn("bridge_crash", bridge="telegram", attempt=attempt,
+                      error=str(exc)[:200], backoff_s=backoff)
+            print(clr(f"\n  ⚠ Telegram bridge crashed (attempt {attempt}), "
+                      f"reconnecting in {backoff:.0f}s…", "yellow"))
+            _telegram_stop.wait(backoff)
+            backoff = min(backoff * 2, _TG_BACKOFF_MAX)
+            continue
+
+        if reason == "auth_error":
+            print(clr("\n  ⚠ Telegram: invalid token — stopping bridge.", "yellow"))
+            _log.warn("bridge_auth_error_stop", bridge="telegram")
+            break
+        # Clean stop or _telegram_stop set
+        break
+
     _telegram_thread = None
 
 
@@ -315,7 +364,8 @@ def cmd_telegram(args: str, _state, config) -> bool:
 
     _telegram_stop = threading.Event()
     _telegram_thread = threading.Thread(
-        target=_tg_poll_loop, args=(token, chat_id, config), daemon=True
+        target=_tg_supervisor, args=(token, chat_id, config), daemon=True,
+        name="telegram-bridge"
     )
     _telegram_thread.start()
     ok(f"Telegram bridge active. Chat ID: {chat_id}")

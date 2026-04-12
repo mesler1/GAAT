@@ -215,11 +215,16 @@ class TestReplVoiceIntegration:
 
         # Patch cmd_voice to return a sentinel directly
         sentinel = ("__voice__", "hello world")
-        with patch.object(cheetahclaws, "cmd_voice", return_value=sentinel):
-            # Re-bind in COMMANDS so the patch is seen
-            cheetahclaws.COMMANDS["voice"] = cheetahclaws.cmd_voice
-            result = cheetahclaws.handle_slash("/voice", object(), {})
-            assert result == sentinel
+        original_voice = cheetahclaws.COMMANDS.get("voice")
+        try:
+            with patch.object(cheetahclaws, "cmd_voice", return_value=sentinel):
+                # Re-bind in COMMANDS so the patch is seen
+                cheetahclaws.COMMANDS["voice"] = cheetahclaws.cmd_voice
+                result = cheetahclaws.handle_slash("/voice", object(), {})
+                assert result == sentinel
+        finally:
+            if original_voice is not None:
+                cheetahclaws.COMMANDS["voice"] = original_voice
 
     def test_voice_status_no_crash(self, capsys):
         """'/voice status' should not raise even without audio hardware."""

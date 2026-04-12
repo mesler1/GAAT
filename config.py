@@ -26,6 +26,37 @@ DEFAULTS = {
     "max_concurrent_agents": 3,
     "session_daily_limit":   10,    # max sessions kept per day in daily/
     "session_history_limit": 200,  # max sessions kept in history.json
+    # ── Security settings ──────────────────────────────────────────────────
+    # allowed_root: restrict file operations (Read/Write/Edit/Glob/Grep) to this
+    # directory tree.  null = unrestricted (CLI default).  Set to the project
+    # root in production deployments to prevent path traversal.
+    "allowed_root": None,
+    # shell_policy: controls Bash tool execution.
+    #   "allow"   — execute freely (CLI default)
+    #   "log"     — execute but write every command to stderr with session_id
+    #   "deny"    — block all Bash execution
+    "shell_policy": "allow",
+    # ── Structured logging ─────────────────────────────────────────────────
+    # log_level: "off" | "error" | "warn" | "info" | "debug"
+    #   Default "warn" keeps the interactive CLI quiet; set to "info" on
+    #   production servers to capture every API call, retry, and quota event.
+    "log_level": "warn",
+    # log_file: absolute path or null.  null → stderr (only warn/error visible
+    #   at default level).  Point to a file in production for persistent logs.
+    "log_file": None,
+    # ── Circuit breaker ────────────────────────────────────────────────────
+    # circuit_failure_threshold: consecutive failures (in window) to trip open.
+    "circuit_failure_threshold": 5,
+    # circuit_window_seconds: rolling window for failure counting.
+    "circuit_window_seconds": 60,
+    # circuit_cooldown_seconds: how long to stay OPEN before probing again.
+    "circuit_cooldown_seconds": 120,
+    # ── Quota / budget control ─────────────────────────────────────────────
+    # All limits are null (unlimited) by default.  Set to enforce hard caps.
+    "session_token_budget": None,  # max tokens (in+out) per session
+    "session_cost_budget":  None,  # max USD per session
+    "daily_token_budget":   None,  # max tokens today (all sessions)
+    "daily_cost_budget":    None,  # max USD today (all sessions)
     # Per-provider API keys (optional; env vars take priority)
     # "anthropic_api_key": "sk-ant-..."
     # "openai_api_key":    "sk-..."
