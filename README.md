@@ -91,6 +91,12 @@ English | [中文](https://github.com/SafeRL-Lab/clawspring/blob/main/docs/READM
 ## 🔥🔥🔥 News (Pacific Time)
 
  
+- Apr 12, 2026 (**v3.05.66**): **Auto max_tokens cap per model + tool robustness fixes**
+  - **Automatic `max_tokens` capping** (`providers.py`) — a new `resolve_max_tokens()` function automatically caps `max_tokens` to the model's actual limit before every API call, eliminating `BadRequestError: max_tokens cannot be greater than max_model_len` errors when using vLLM or other bounded local endpoints. Priority: (1) per-model hard limit from a built-in table of 30+ known models; (2) for `custom` provider, `GET /v1/models` is queried at first call and the `max_model_len` field is used (result cached per base URL); (3) provider-level `context_limit // 2` as a conservative fallback. The user's configured value is always treated as an upper bound — never increased.
+  - **`KeyError: 'file_path'` in agent tool calls** (`tools.py`) — when a model (e.g. Qwen) generates a malformed tool call omitting the required `file_path` parameter for `Read` / `Write` / `Edit`, the agent runner now returns a descriptive error string (`"Error: missing required parameter 'file_path'"`) instead of crashing with an unhandled `KeyError`. The agent can then self-correct on the next iteration.
+  - **`KeyError: 'white'` in `/agent` SSJ wizard** (`ui/render.py`) — `"white": "\033[37m"` added to the ANSI color table `C`; the agent wizard's summary box used `clr(name, 'white')` which crashed on startup.
+  - **Version bumped to 3.05.66.**
+
 - Apr 12, 2026 (**v3.05.65**): **`/agent` SSJ entry, bridge-compatible wizard, and `/monitor` interactive wizard fix**
   - **SSJ entry 14 — 🤖 Agent** (`commands/advanced.py`) — The SSJ power menu now has a 14th option that launches the `/agent` interactive wizard directly, covering all four autonomous templates (Research Assistant, Auto Bug Fixer, Paper Writer, Auto Coder).
   - **Bridge-compatible agent wizard** (`commands/agent_cmd.py`) — The wizard's input helper `_ask()` now routes through `ask_input_interactive()` so it works correctly over Telegram, Slack, and WeChat bridges (previously used bare `input()` which is terminal-only).

@@ -184,7 +184,7 @@ from tools import (
 # ── Live session context (replaces config["_run_query_callback"] etc.) ─────
 import runtime
 
-VERSION = "3.05.63"
+VERSION = "3.05.66"
 
 # ── Load feature modules from modular/ ecosystem ───────────────────────────
 # Commands from modular/ are merged into COMMANDS after the dict is built.

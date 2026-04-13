@@ -203,6 +203,104 @@ def bare_model(model: str) -> str:
     return model.split("/", 1)[1] if "/" in model else model
 
 
+# ── Auto max_tokens cap ────────────────────────────────────────────────────
+
+# Per-model output limits for well-known models (output tokens, not context)
+_MODEL_OUTPUT_LIMITS: dict[str, int] = {
+    # Anthropic
+    "claude-opus-4-6":            16000,
+    "claude-sonnet-4-6":          16000,
+    "claude-haiku-4-5-20251001":  8192,
+    "claude-opus-4-5":            16000,
+    "claude-sonnet-4-5":          16000,
+    "claude-3-5-sonnet-20241022": 8192,
+    "claude-3-5-haiku-20241022":  8192,
+    # OpenAI
+    "gpt-4o":      16384,
+    "gpt-4o-mini": 16384,
+    "gpt-4.1":     32768,
+    "gpt-4.1-mini":32768,
+    "gpt-5":       32768,
+    "o1":          32768,
+    "o3":          100000,
+    "o4-mini":     100000,
+    # Gemini
+    "gemini-2.5-pro-preview-03-25": 65536,
+    "gemini-2.0-flash":             8192,
+    "gemini-1.5-pro":               8192,
+    # DeepSeek
+    "deepseek-chat":     8192,
+    "deepseek-reasoner": 32768,
+}
+
+# Cache: base_url → {model_id → max_model_len}
+_custom_ctx_cache: dict[str, dict[str, int]] = {}
+
+
+def _fetch_custom_model_limit(base_url: str, model: str, api_key: str) -> int | None:
+    """Query /v1/models on a custom (vLLM/etc.) endpoint for max_model_len.
+    Returns None on any failure. Results are cached per base_url."""
+    cache = _custom_ctx_cache.setdefault(base_url, {})
+    if model in cache:
+        return cache[model]
+    try:
+        url = base_url.rstrip("/") + "/models"
+        req = urllib.request.Request(
+            url, headers={"Authorization": f"Bearer {api_key or 'dummy'}"}
+        )
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read())
+        for entry in data.get("data", []):
+            mid = entry.get("id", "")
+            limit = entry.get("max_model_len") or entry.get("context_window")
+            if limit:
+                cache[mid] = int(limit)
+        return cache.get(model)
+    except Exception:
+        return None
+
+
+def resolve_max_tokens(config: dict, provider: str, model: str,
+                       base_url: str = "", api_key: str = "") -> int | None:
+    """Return the effective max_tokens to use, auto-capping to the model's limit.
+
+    Priority:
+      1. Per-model hard limit from _MODEL_OUTPUT_LIMITS (known models)
+      2. For 'custom' provider: query /v1/models for max_model_len
+      3. Provider-level context_limit from PROVIDERS registry
+      4. User's configured value unchanged (no cap available)
+
+    Always respects the user's configured value as an upper bound — never
+    increases it beyond what was requested.
+    """
+    requested = config.get("max_tokens")
+    if not requested:
+        return None  # let the caller use its own default
+
+    # 1. Known per-model limit
+    bare = bare_model(model)
+    known = _MODEL_OUTPUT_LIMITS.get(bare)
+    if known:
+        return min(requested, known)
+
+    # 2. Custom endpoint: query /v1/models
+    if provider == "custom" and base_url:
+        ctx_limit = _fetch_custom_model_limit(base_url, model, api_key)
+        if ctx_limit:
+            # Reserve 256 tokens so max_tokens never equals max_model_len exactly
+            # (vLLM rejects max_tokens == max_model_len in some versions)
+            safe = max(256, ctx_limit - 256)
+            return min(requested, safe)
+
+    # 3. Provider-level context limit (conservative: cap output to 1/2 context)
+    prov_ctx = PROVIDERS.get(provider, {}).get("context_limit")
+    if prov_ctx:
+        cap = prov_ctx // 2
+        return min(requested, cap)
+
+    return requested
+
+
 def get_api_key(provider_name: str, config: dict) -> str:
     prov = PROVIDERS.get(provider_name, {})
     # 1. Check config dict (e.g. config["kimi_api_key"])
@@ -388,9 +486,10 @@ def stream_anthropic(
     import anthropic as _ant
     client = _ant.Anthropic(api_key=api_key)
 
+    _mt = resolve_max_tokens(config, "anthropic", model) or 8192
     kwargs = {
         "model":      model,
-        "max_tokens": config.get("max_tokens", 8192),
+        "max_tokens": _mt,
         "system":     system,
         "messages":   messages_to_anthropic(messages),
         "tools":      tool_schemas,
@@ -466,11 +565,12 @@ def stream_openai_compat(
         # "auto" requires vLLM --enable-auto-tool-choice; omit if server doesn't support it
         if not config.get("disable_tool_choice"):
             kwargs["tool_choice"] = "auto"
-    if config.get("max_tokens"):
-        _prov = detect_provider(model)
+    _prov = detect_provider(model)
+    _effective_mt = resolve_max_tokens(config, _prov, model, base_url, api_key)
+    if _effective_mt:
+        # Further cap by provider-level max_completion_tokens if present
         prov_cap = PROVIDERS.get(_prov, {}).get("max_completion_tokens")
-        mt = config["max_tokens"]
-        val = min(mt, prov_cap) if prov_cap else mt
+        val = min(_effective_mt, prov_cap) if prov_cap else _effective_mt
         # Newer OpenAI models (o1/o3/o4/gpt-5 family) dropped max_tokens in favour of
         # max_completion_tokens.  Use max_completion_tokens for the openai provider so
         # all current and future OpenAI models work without per-model special-casing.

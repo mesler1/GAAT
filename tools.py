@@ -383,19 +383,28 @@ def _register_builtins() -> None:
         ToolDef(
             name="Read",
             schema=_schemas["Read"],
-            func=lambda p, c: _check_path_allowed(p["file_path"], c) or _read(**p),
+            func=lambda p, c: (
+                "Error: missing required parameter 'file_path'" if not p.get("file_path")
+                else _check_path_allowed(p["file_path"], c) or _read(**p)
+            ),
             read_only=True, concurrent_safe=True,
         ),
         ToolDef(
             name="Write",
             schema=_schemas["Write"],
-            func=lambda p, c: _check_path_allowed(p["file_path"], c) or _write(**p),
+            func=lambda p, c: (
+                "Error: missing required parameter 'file_path'" if not p.get("file_path")
+                else _check_path_allowed(p["file_path"], c) or _write(**p)
+            ),
             read_only=False, concurrent_safe=False,
         ),
         ToolDef(
             name="Edit",
             schema=_schemas["Edit"],
-            func=lambda p, c: _check_path_allowed(p["file_path"], c) or _edit(**p),
+            func=lambda p, c: (
+                "Error: missing required parameter 'file_path'" if not p.get("file_path")
+                else _check_path_allowed(p["file_path"], c) or _edit(**p)
+            ),
             read_only=False, concurrent_safe=False,
         ),
         ToolDef(
