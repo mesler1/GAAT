@@ -175,7 +175,7 @@ CheetahClaws: **A Lightweight** and **Easy-to-Use** Python Reimplementation of C
   * [Cloud Sync (GitHub Gist)](#cloud-sync-github-gist)
   * [Project Structure](#project-structure)
   * [FAQ](#faq)
-  * [CITATION](#citation)
+  * [Citation](#citation)
 
 
 
