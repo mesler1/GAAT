@@ -175,6 +175,7 @@ CheetahClaws: **A Lightweight** and **Easy-to-Use** Python Reimplementation of C
   * [Cloud Sync (GitHub Gist)](#cloud-sync-github-gist)
   * [Project Structure](#project-structure)
   * [FAQ](#faq)
+  * [CITATION](#citation)
 
 
 
@@ -3561,3 +3562,16 @@ Yes. Set the language before recording:
 ```
 
 Whisper supports 99 languages. `auto` detection works well but explicit codes improve accuracy for short utterances.
+
+
+
+## Citation
+If you find the repository useful, please cite the study
+``` Bash
+@article{cheetahclaws2026,
+  title={CheetahClaws: An Extensible, Python-Native Agent System for Autonomous Multi-Model Workflows},
+  author={CheetahClaws Team},
+  journal={github},
+  year={2026}
+}
+```
