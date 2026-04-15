@@ -74,7 +74,7 @@ Other install methods: [pip install](#alternative-install-with-pip) | [uv instal
  <img src="https://github.com/SafeRL-Lab/clawspring/blob/main/docs/ssj_demo.gif" width="850"/> 
  </div>
 <div align=center>
-<center style="color:#000000;text-decoration:underline">SSJ Developer Mode: Power Menu Workflow</center>
+<center style="color:#000000;text-decoration:underline">SSJ Mode (Simple and Smart Job Mode): Power Menu Workflow</center>
  </div>
 
 ---
