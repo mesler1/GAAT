@@ -223,6 +223,59 @@ Session loaded from ... (24 messages)
 
 ---
 
+## 10. Browse Dynamic Web Pages
+
+Use `WebBrowse` for JavaScript-heavy pages that `WebFetch` can't render:
+
+```
+[project] » Go to https://github.com/trending and tell me the top 5 trending repos today.
+```
+
+The AI will use `WebBrowse` to render the page with headless Chromium and extract the content.
+
+**Install:** `pip install cheetahclaws[browser] && playwright install chromium`
+
+---
+
+## 11. Read and Reply to Emails
+
+```bash
+# First, configure email (one time)
+cheetahclaws
+/config email_address=you@gmail.com
+/config email_password=your-app-password
+/config email_imap_host=imap.gmail.com
+/config email_smtp_host=smtp.gmail.com
+```
+
+Then use naturally:
+
+```
+[project] » Check my latest emails from boss@company.com
+[project] » Summarize the quarterly report email
+[project] » Draft a reply saying I'll have the analysis ready by Friday
+```
+
+The AI reads your inbox, summarizes emails, and drafts replies — always asking for confirmation before sending.
+
+---
+
+## 12. Analyze PDFs and Spreadsheets
+
+```
+[project] » Read the contract at ~/Documents/contract.pdf and summarize the key terms
+[project] » Open data.xlsx and find the top 10 customers by revenue
+[project] » Extract text from this scanned receipt: ~/photos/receipt.jpg
+```
+
+**Install:**
+```bash
+pip install "cheetahclaws[files]"    # PDF + Excel
+pip install "cheetahclaws[ocr]"      # image OCR (also needs: brew install tesseract)
+```
+
+---
+
 ## Tips
 
 - **`/search <query>`** — full-text search across all past sessions

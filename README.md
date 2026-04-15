@@ -118,6 +118,10 @@ Other install methods: [pip install](#alternative-install-with-pip) | [uv instal
   - **Safe stdio wrapper** (`cheetahclaws.py`) — `sys.stdout`/`sys.stderr` wrapped with `_SafeWriter` that silently handles `BrokenPipeError` and closed file descriptors. Prevents crashes when terminal disconnects during bridge/daemon operation.
   - **One-line installer** (`scripts/install.sh`) — `curl -fsSL .../install.sh | bash` handles platform detection (Linux/macOS/WSL2/Termux), Python/git/pip checks, clone, install, and PATH setup. First run triggers the setup wizard automatically.
   - **Contributing section** in README with quick-start commands for contributors, linking to CONTRIBUTING.md and Plugin Authoring Guide.
+  - **Browser tool** (`tools/browser.py`) — `WebBrowse` renders JavaScript pages with headless Chromium (via playwright). Supports extract, screenshot, and click actions with CSS selectors. Solves dynamic/SPA pages that `WebFetch` can't handle. Optional: `pip install cheetahclaws[browser]`.
+  - **Email tools** (`tools/email.py`) — `ReadEmail` (IMAP) reads inbox with search by sender/subject; `SendEmail` (SMTP) sends emails with threading support. Zero external deps (Python stdlib). Configure with `/config email_address=...`.
+  - **File tools** (`tools/files.py`) — `ReadPDF` extracts text from PDFs (pymupdf); `ReadImage` does OCR on images (pytesseract, 99 languages); `ReadSpreadsheet` reads Excel/CSV/TSV with formatted table output. Optional: `pip install cheetahclaws[files]`.
+  - **`[all]` extra** — `pip install cheetahclaws[all]` installs every optional dependency (voice, vision, autosuggest, browser, files, OCR).
   - **Version bumped to 3.05.72.**
 
 - Apr 15, 2026 (**v3.05.71**): **Plugin docs, example template, config namespace fix, typing-time autosuggest**
@@ -500,9 +504,13 @@ pip install .
 pip install ".[voice]"              # voice input (sounddevice)
 pip install ".[vision]"             # clipboard image capture (Pillow)
 pip install ".[autosuggest]"        # typing-time slash command autosuggest (prompt_toolkit)
-pip install ".[voice,vision,autosuggest]"   # all optional extras
+pip install ".[browser]"            # headless browser for JS-rendered pages (playwright)
+pip install ".[files]"              # PDF + Excel reading (pymupdf, openpyxl)
+pip install ".[ocr]"                # image OCR (pytesseract, Pillow)
+pip install ".[all]"                # everything above
 ```
 
+> **Note:** After installing `[browser]`, run `playwright install chromium` to download the browser binary.
 ---
 
 ### Alternative: install with `uv`
@@ -840,12 +848,12 @@ Detailed guides have been moved to [`docs/guides/`](docs/guides/) to keep this R
 
 | Guide | What's Inside |
 |-------|---------------|
-| [**Reference**](docs/guides/reference.md) | CLI options, all 36+ slash commands, API key config, permission system, 27 built-in tools, session search, auxiliary model, error classification, prompt injection detection, tool cache, parallel tools |
+| [**Reference**](docs/guides/reference.md) | CLI, 36+ commands, 33 built-in tools (incl. WebBrowse, ReadEmail, SendEmail, ReadPDF, ReadImage, ReadSpreadsheet), session search, auxiliary model, error classification, prompt injection detection, tool cache, parallel tools |
 | [**Extensions**](docs/guides/extensions.md) | Memory system, Skills, Sub-Agents, MCP servers, Plugin system, Monitor subscriptions, Autonomous Agents |
 | [**Bridges**](docs/guides/bridges.md) | Telegram, WeChat, Slack setup and remote control from your phone |
 | [**Voice & Video**](docs/guides/voice-and-video.md) | Voice input (offline Whisper), Video Content Factory, TTS Content Factory |
 | [**Advanced**](docs/guides/advanced.md) | Brainstorm, SSJ Developer Mode, Tmux, Proactive monitoring, Checkpoints, Plan mode, Session management, Cloud sync |
-| [**Recipes**](docs/guides/recipes.md) | 9 step-by-step examples: code review with Ollama, Telegram remote control, autonomous research, bug fix, brainstorm, session search, and more |
+| [**Recipes**](docs/guides/recipes.md) | 12 step-by-step examples: code review, Telegram remote control, autonomous research, bug fix, brainstorm, session search, browse web pages, email, PDF/Excel analysis, and more |
 | [**Plugin Authoring**](docs/guides/plugin-authoring.md) | Build your own plugin: tools, commands, skills, MCP servers, publishing checklist |
 | [**Example Plugin**](examples/example-plugin/) | Copy-and-edit starter template with working tools, commands, and skills |
 | [**Contributing**](CONTRIBUTING.md) | Project structure, architecture guide, PR checklist |

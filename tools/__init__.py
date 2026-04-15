@@ -517,6 +517,14 @@ try:
 except Exception:
     pass
 
+# Sub-modules within tools/ package (self-registering on import)
+import importlib as _il
+for _sub in ("browser", "email", "files"):
+    try:
+        _il.import_module(f"tools.{_sub}")
+    except Exception:
+        pass
+
 # ── Plan mode tools (EnterPlanMode / ExitPlanMode) ────────────────────────
 
 from pathlib import Path as _Path

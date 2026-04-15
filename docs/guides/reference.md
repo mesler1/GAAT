@@ -539,3 +539,151 @@ No configuration needed — parallelization is automatic when safe.
 
 ---
 
+## Browser Tool (WebBrowse)
+
+Renders JavaScript-heavy pages with a headless Chromium browser. Use instead of `WebFetch` for dynamic/SPA pages.
+
+**Install:** `pip install cheetahclaws[browser]` then `playwright install chromium`
+
+**Actions:**
+
+| Action | Description |
+|--------|-------------|
+| `extract` (default) | Get page text content |
+| `screenshot` | Capture page as PNG image |
+| `click` | Click a CSS selector, then extract resulting content |
+
+**Examples:**
+
+```
+# Extract text from a React SPA
+WebBrowse(url="https://example.com/dashboard")
+
+# Extract specific elements
+WebBrowse(url="https://news.ycombinator.com", selector=".titleline > a")
+
+# Click a button then read the result
+WebBrowse(url="https://example.com", action="click", selector="#load-more")
+
+# Wait longer for slow pages
+WebBrowse(url="https://example.com/report", wait=10)
+```
+
+Falls back gracefully with install instructions if `playwright` is not installed.
+
+---
+
+## Email Tools (ReadEmail / SendEmail)
+
+Read and send emails directly from the REPL. Uses Python stdlib (no external deps).
+
+**Setup:**
+```
+/config email_address=you@gmail.com
+/config email_password=your-app-password
+/config email_imap_host=imap.gmail.com
+/config email_smtp_host=smtp.gmail.com
+```
+
+> **Gmail users:** Use an [App Password](https://myaccount.google.com/apppasswords), not your regular password.
+
+**ReadEmail examples:**
+
+```
+# Read latest 5 emails
+ReadEmail()
+
+# Read emails from a specific sender
+ReadEmail(search="boss@company.com", limit=10)
+
+# Search by subject
+ReadEmail(search="quarterly report")
+
+# Read from a different folder
+ReadEmail(folder="Sent")
+```
+
+**SendEmail example:**
+
+```
+SendEmail(
+  to="colleague@company.com",
+  subject="Meeting notes",
+  body="Here are the key takeaways from today's meeting..."
+)
+```
+
+The AI will always ask for confirmation before sending.
+
+---
+
+## File Tools (ReadPDF / ReadImage / ReadSpreadsheet)
+
+Enhanced file reading for common document formats.
+
+### ReadPDF
+
+**Install:** `pip install cheetahclaws[files]`
+
+```
+# Read entire PDF
+ReadPDF(file_path="/path/to/document.pdf")
+
+# Read specific pages
+ReadPDF(file_path="/path/to/report.pdf", pages="1-5")
+
+# Read specific pages by number
+ReadPDF(file_path="/path/to/manual.pdf", pages="1,3,7-10")
+```
+
+### ReadImage (OCR)
+
+**Install:** `pip install cheetahclaws[ocr]` + system Tesseract
+
+```bash
+# Install Tesseract OCR engine:
+# macOS:  brew install tesseract
+# Ubuntu: sudo apt install tesseract-ocr
+# For Chinese: sudo apt install tesseract-ocr-chi-sim
+```
+
+```
+# English OCR
+ReadImage(file_path="/path/to/screenshot.png")
+
+# Chinese OCR
+ReadImage(file_path="/path/to/document.jpg", language="chi_sim")
+
+# Japanese
+ReadImage(file_path="/path/to/scan.tiff", language="jpn")
+```
+
+### ReadSpreadsheet
+
+**Install:** `pip install cheetahclaws[files]` (for Excel; CSV works without any install)
+
+```
+# Read CSV
+ReadSpreadsheet(file_path="/path/to/data.csv")
+
+# Read Excel with specific sheet
+ReadSpreadsheet(file_path="/path/to/report.xlsx", sheet="Q4 Results")
+
+# Limit rows
+ReadSpreadsheet(file_path="/path/to/big_data.csv", max_rows=50)
+```
+
+Output is formatted as an aligned text table:
+
+```
+data.csv (showing 5 rows)
+
+Name       | Age | City
+-----------+-----+-----------
+Alice      | 30  | New York
+Bob        | 25  | London
+Charlie    | 35  | Tokyo
+```
+
+---
+

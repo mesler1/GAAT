@@ -21,6 +21,10 @@ dependencies = [
 voice       = ["sounddevice"]
 vision      = ["Pillow"]
 autosuggest = ["prompt_toolkit>=3.0.43"]
+browser     = ["playwright"]
+files       = ["pymupdf", "openpyxl"]
+ocr         = ["pytesseract", "Pillow"]
+all         = ["sounddevice", "Pillow", "prompt_toolkit>=3.0.43", "playwright", "pymupdf", "openpyxl", "pytesseract"]
 
 [project.scripts]
 cheetahclaws = "cheetahclaws:main"
