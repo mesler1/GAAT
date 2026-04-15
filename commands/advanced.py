@@ -330,17 +330,145 @@ def cmd_worker(args: str, state, config) -> bool:
     return ("__worker__", worker_prompts)
 
 
+# ── SSJ Trading Sub-menu ───────────────────────────────────────────────────
+
+def _ssj_trading_submenu(config, state):
+    """Interactive trading sub-menu for SSJ mode."""
+    from tools import ask_input_interactive
+
+    _TRADING_SUBMENU = (
+        clr("\n╭─ 📈 Trading Agent ", "dim") + clr("━━━━━━━━━━━━━━━━━━━━━━━━━", "dim")
+        + "\n│"
+        + "\n│  " + clr("a.", "bold") + " 🔍  Quick Analyze — Full multi-agent analysis (Bull/Bear + Risk + PM)"
+        + "\n│  " + clr("b.", "bold") + " 📊  Backtest     — Test a strategy on historical data"
+        + "\n│  " + clr("c.", "bold") + " 💰  Price Check  — Current price & key metrics"
+        + "\n│  " + clr("d.", "bold") + " 📉  Indicators   — Technical indicators report"
+        + "\n│  " + clr("e.", "bold") + " 🤖  Trading Bot  — Launch autonomous trading agent"
+        + "\n│  " + clr("f.", "bold") + " 📜  History      — Past trading decisions"
+        + "\n│  " + clr("g.", "bold") + " 🧠  Memory       — Trading memory status"
+        + "\n│  " + clr("0.", "bold") + " ↩   Back to SSJ"
+        + "\n│"
+        + "\n" + clr("╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "dim")
+    )
+
+    print(_TRADING_SUBMENU)
+    try:
+        choice = ask_input_interactive(clr("\n  📈 Trading » ", "cyan", "bold"), config, _TRADING_SUBMENU).strip().lower()
+    except (KeyboardInterrupt, EOFError):
+        return True
+
+    if choice in ("0", "q", ""):
+        return True
+
+    elif choice == "a":
+        symbol = ask_input_interactive(
+            clr("  Symbol (e.g. AAPL, BTC, NVDA): ", "cyan"), config
+        ).strip().upper()
+        if not symbol:
+            err("Symbol required.")
+            return True
+        return ("__ssj_passthrough__", f"/trading analyze {symbol}")
+
+    elif choice == "b":
+        symbol = ask_input_interactive(
+            clr("  Symbol (e.g. AAPL, BTC): ", "cyan"), config
+        ).strip().upper()
+        if not symbol:
+            err("Symbol required.")
+            return True
+
+        _STRAT_MENU = (
+            clr("\n  Strategies:", "cyan")
+            + "\n    1. dual_ma          — SMA(20/50) crossover (trend following)"
+            + "\n    2. rsi_mean_reversion — RSI 30/70 (mean reversion)"
+            + "\n    3. bollinger_breakout — Bollinger Band breakout"
+            + "\n    4. macd_crossover   — MACD histogram (momentum)"
+            + "\n    5. all              — Run all & compare"
+        )
+        print(_STRAT_MENU)
+        strat_choice = ask_input_interactive(
+            clr("  Strategy [1-5, default=5]: ", "cyan"), config, _STRAT_MENU
+        ).strip()
+
+        strat_map = {"1": "dual_ma", "2": "rsi_mean_reversion",
+                     "3": "bollinger_breakout", "4": "macd_crossover"}
+
+        if strat_choice in ("5", ""):
+            # Run all strategies and compare
+            return ("__ssj_query__",
+                    f"Run backtests on {symbol} using all 4 built-in strategies "
+                    f"(dual_ma, rsi_mean_reversion, bollinger_breakout, macd_crossover). "
+                    f"Use the RunBacktest tool for each. Present results in a comparison table "
+                    f"and recommend the best strategy based on Sharpe ratio.")
+        elif strat_choice in strat_map:
+            strategy = strat_map[strat_choice]
+            return ("__ssj_passthrough__", f"/trading backtest {symbol} {strategy}")
+        else:
+            err(f"Invalid choice: {strat_choice}")
+            return True
+
+    elif choice == "c":
+        symbol = ask_input_interactive(
+            clr("  Symbol (e.g. AAPL, BTC, ETH): ", "cyan"), config
+        ).strip().upper()
+        if symbol:
+            return ("__ssj_passthrough__", f"/trading price {symbol}")
+        err("Symbol required.")
+        return True
+
+    elif choice == "d":
+        symbol = ask_input_interactive(
+            clr("  Symbol (e.g. AAPL, NVDA): ", "cyan"), config
+        ).strip().upper()
+        if symbol:
+            return ("__ssj_passthrough__", f"/trading indicators {symbol}")
+        err("Symbol required.")
+        return True
+
+    elif choice == "e":
+        watchlist = ask_input_interactive(
+            clr("  Watchlist (comma-separated, default: AAPL,MSFT,GOOGL,NVDA,BTC,ETH): ", "cyan"), config
+        ).strip()
+        if not watchlist:
+            watchlist = "AAPL,MSFT,GOOGL,NVDA,BTC,ETH"
+        return ("__ssj_query__",
+                f"You are the CheetahClaws Trading Agent. Analyze each symbol in this watchlist: {watchlist}. "
+                f"For each symbol:\n"
+                f"1. Use GetPrice and GetTechnicalIndicators to gather data\n"
+                f"2. Run the full multi-agent analysis pipeline:\n"
+                f"   - Bull Researcher: build bullish case with data\n"
+                f"   - Bear Researcher: build bearish case with data\n"
+                f"   - Research Judge: decisive BUY/SELL/HOLD recommendation\n"
+                f"   - Risk Panel: aggressive/conservative/neutral perspectives\n"
+                f"   - Portfolio Manager: final RATING (BUY/OVERWEIGHT/HOLD/UNDERWEIGHT/SELL)\n"
+                f"3. Present a summary table at the end with all symbols and ratings.\n"
+                f"Be specific — cite actual indicator values and fundamentals.")
+
+    elif choice == "f":
+        return ("__ssj_passthrough__", "/trading history")
+
+    elif choice == "g":
+        return ("__ssj_passthrough__", "/trading status")
+
+    else:
+        err(f"Invalid choice: {choice}")
+    return True
+
+
 # ── SSJ ────────────────────────────────────────────────────────────────────
 
 def cmd_ssj(args: str, state, config) -> bool:
     """SSJ Developer Mode — Interactive power menu for project workflows."""
     try:
         import modular
-        _VIDEO_AVAILABLE = "video" in modular.load_all_commands()
-        _VOICE_MODULAR   = "voice" in modular.load_all_commands()
+        _all_cmds = modular.load_all_commands()
+        _VIDEO_AVAILABLE    = "video"   in _all_cmds
+        _VOICE_MODULAR      = "voice"   in _all_cmds
+        _TRADING_AVAILABLE  = "trading" in _all_cmds
     except Exception:
-        _VIDEO_AVAILABLE = False
-        _VOICE_MODULAR   = False
+        _VIDEO_AVAILABLE   = False
+        _VOICE_MODULAR     = False
+        _TRADING_AVAILABLE = False
 
     from tools import ask_input_interactive
 
@@ -360,7 +488,8 @@ def cmd_ssj(args: str, state, config) -> bool:
         + ("\n│  " + clr("11.", "bold") + " 🎬  Video — AI video content factory" if _VIDEO_AVAILABLE else "")
         + ("\n│  " + clr("12.", "bold") + " 🎙  TTS   — AI voice generation (any style)" if _VOICE_MODULAR else "")
         + "\n│  " + clr("13.", "bold") + " 📡  Monitor — AI subscriptions & alerts"
-        + "\n│  " + clr("14.", "bold") + " 🤖  Agent  — Autonomous task agents (research / bug-fix / code / write)"
+        + ("\n│  " + clr("14.", "bold") + " 📈  Trading — Market analysis, backtest & trading agent" if _TRADING_AVAILABLE else "")
+        + "\n│  " + clr("15.", "bold") + " 🤖  Agent  — Autonomous task agents (research / bug-fix / code / write)"
         + "\n│  " + clr(" 0.", "bold") + " 🚪  Exit SSJ Mode  (or type q)"
         + "\n│"
         + "\n" + clr("╰──────────────────────────────────────────────", "dim")
@@ -483,7 +612,10 @@ def cmd_ssj(args: str, state, config) -> bool:
         elif choice == "13":
             return ("__ssj_passthrough__", "/monitor")
 
-        elif choice == "14":
+        elif choice == "14" and _TRADING_AVAILABLE:
+            return _ssj_trading_submenu(config, state)
+
+        elif choice == "15":
             return ("__ssj_passthrough__", "/agent")
 
         else:

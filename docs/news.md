@@ -2,6 +2,9 @@
  
 ## 🔥🔥🔥 News (Pacific Time)
 
+- Apr 15, 2026 (**v3.05.72**): **Trading agent module**
+  - **Trading agent** (`modular/trading/`) — AI-powered multi-agent trading analysis and backtesting system. 5-phase pipeline: data collection (11 technical indicators, fundamentals, news) → Bull/Bear researcher debate with BM25 memory → research judge → risk management panel (aggressive/conservative/neutral 3-way debate) → portfolio manager final decision (BUY/OVERWEIGHT/HOLD/UNDERWEIGHT/SELL). 4 built-in backtest strategies with equity and crypto engines. 7 AI tools, data source fallback chains (yfinance → coingecko → akshare). Post-trade reflection feeds lessons into BM25 memory. SSJ option 14 with guided sub-menu. Supports US/HK/A-share stocks and 20+ cryptos. Install: `pip install "cheetahclaws[trading]"`. Full guide: [docs/guides/trading.md](guides/trading.md).
+
 - Apr 14, 2026 (**v3.05.68**): **CI/CD, config/runtime separation, and module reorganization**
   - **GitHub Actions CI** (`.github/workflows/ci.yml`) — added automated testing on every push and PR: `pytest` across Python 3.10–3.13, plus a package smoke test that installs via `pip install .` and verifies all modules are importable. No more silent packaging regressions.
   - **Config/runtime separation** (`runtime.py`) — runtime state (`_proactive_thread`, `_pending_image`, `_plan_file`, bridge turn flags, etc.) moved out of the `config` dict into `RuntimeContext` fields. The `config` dict now holds only serializable user configuration. Added `runtime.get_ctx(config)` helper for easy access. Migrated 18 files; 327 tests pass.

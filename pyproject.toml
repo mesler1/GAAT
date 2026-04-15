@@ -24,7 +24,8 @@ autosuggest = ["prompt_toolkit>=3.0.43"]
 browser     = ["playwright"]
 files       = ["pymupdf", "openpyxl"]
 ocr         = ["pytesseract", "Pillow"]
-all         = ["sounddevice", "Pillow", "prompt_toolkit>=3.0.43", "playwright", "pymupdf", "openpyxl", "pytesseract"]
+trading     = ["yfinance>=0.2.30", "rank-bm25>=0.2.2"]
+all         = ["sounddevice", "Pillow", "prompt_toolkit>=3.0.43", "playwright", "pymupdf", "openpyxl", "pytesseract", "yfinance>=0.2.30", "rank-bm25>=0.2.2"]
 
 [project.scripts]
 cheetahclaws = "cheetahclaws:main"
@@ -60,12 +61,14 @@ packages = [
     "cc_mcp", "memory", "monitor", "multi_agent", "plugin", "skill", "task",
     "voice", "video", "checkpoint",
     "ui", "bridges", "commands",
-    "modular", "modular.video", "modular.voice",
+    "modular", "modular.video", "modular.voice", "modular.trading",
+    "modular.trading.data", "modular.trading.engines", "modular.trading.agents",
 ]
 
 [tool.setuptools.package-data]
 "modular.video" = ["PLUGIN.md"]
 "modular.voice" = ["PLUGIN.md"]
+"modular.trading" = ["PLUGIN.md", "skills/*.md", "agent_templates/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

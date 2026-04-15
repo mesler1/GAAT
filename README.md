@@ -111,7 +111,8 @@ Other install methods: [pip install](#alternative-install-with-pip) | [uv instal
 ## 🔥🔥🔥 News (Pacific Time)
 
  
-- Apr 15, 2026 (**v3.05.72**): **Error classifier, parallel tools, prompt injection detection, SQLite sessions, tool cache, auxiliary model, safe stdio**
+- Apr 15, 2026 (**v3.05.72**): **Trading agent, error classifier, parallel tools, prompt injection detection, SQLite sessions, tool cache, auxiliary model, safe stdio**
+  - **Trading agent module** (`modular/trading/`) — AI-powered multi-agent trading analysis and backtesting system. 5-phase analysis pipeline: data collection (technical indicators, fundamentals, news) → Bull/Bear researcher debate with BM25 memory → research judge recommendation → risk management panel (aggressive/conservative/neutral 3-way debate) → portfolio manager final decision (BUY/OVERWEIGHT/HOLD/UNDERWEIGHT/SELL). 4 built-in backtest strategies (dual MA, RSI mean reversion, Bollinger breakout, MACD crossover) with equity and crypto engines. 7 AI tools (`GetMarketData`, `GetPrice`, `GetTechnicalIndicators`, `GetFundamentals`, `GetNews`, `RunBacktest`, `TradingMemory`). 11 pure-Python technical indicators. Data source fallback chains (yfinance → coingecko → akshare). Post-trade reflection mechanism feeds lessons back into BM25 memory. SSJ integration as option 14 with guided sub-menu. Supports US/HK/A-share stocks and 20+ cryptos. Install: `pip install "cheetahclaws[trading]"`.
   - **Error classifier** (`error_classifier.py`) — centralized API error taxonomy (auth, billing, rate_limit, context_overflow, model_not_found, overloaded, connection, timeout) with per-category recovery hints, retryability, and backoff multipliers. Replaces fragile string matching in `agent.py` and `cheetahclaws.py`.
   - **Parallel tool execution** (`agent.py`) — when the LLM returns multiple tool calls, `concurrent_safe=True` tools (Read, Glob, Grep, WebSearch, etc.) now run in parallel via ThreadPoolExecutor (up to 8 workers). Write tools remain sequential. Permission checks are still serial.
   - **Prompt injection detection** (`context.py`) — CLAUDE.md files are scanned for 8 threat patterns (e.g., "ignore previous instructions", "system prompt override", credential exfiltration via curl/echo) before injection into the system prompt. Detected files are excluded with a security warning.
@@ -182,6 +183,7 @@ CheetahClaws: **A Lightweight** and **Easy-to-Use** Python Reimplementation of C
   * [Usage: Closed-Source API Models](#usage-closed-source-api-models)
   * [Usage: Open-Source Models (Local)](#usage-open-source-models-local)
   * [Model Name Format](#model-name-format)
+  * [Trading Agent](#trading-agent) (multi-agent analysis, backtesting, memory)
   * [Documentation](#documentation) (guides for all features)
   * [Contributing](#contributing)
   * [FAQ](#faq)
@@ -360,7 +362,8 @@ Claude Code is a powerful, production-grade AI coding assistant — but its sour
 | 36 slash commands | `/model` · `/config` · `/save` · `/cost` · `/memory` · `/skills` · `/agents` · `/voice` · `/proactive` · `/checkpoint` · `/plan` · `/compact` · `/status` · `/doctor` · … |
 | Voice input | Record → transcribe → auto-submit. Backends: `sounddevice` / `arecord` / SoX + `faster-whisper` / `openai-whisper` / OpenAI API. Works fully offline. |
 | Brainstorm | `/brainstorm [topic]` generates N expert personas suited to the topic (2–100, default 5, chosen interactively), runs an iterative debate, saves results to `brainstorm_outputs/`, and synthesizes a Master Plan + auto-generates `brainstorm_outputs/todo_list.txt`. |
-| SSJ Developer Mode | `/ssj` opens a persistent interactive power menu with **14 shortcuts**: Brainstorm, TODO viewer, Worker, Expert Debate, Propose, Review, Readme, Commit, Scan, Promote, Video factory, TTS factory, Monitor, Agent. Stays open between actions; `/command` passthrough supported. |
+| SSJ Developer Mode | `/ssj` opens a persistent interactive power menu with **15 shortcuts**: Brainstorm, TODO viewer, Worker, Expert Debate, Propose, Review, Readme, Commit, Scan, Promote, Video factory, TTS factory, Monitor, **Trading**, Agent. Stays open between actions; `/command` passthrough supported. |
+| Trading agent | `/trading analyze <SYMBOL>` runs a full multi-agent pipeline: data collection → Bull/Bear researcher debate → research judge → risk management panel (aggressive/conservative/neutral) → portfolio manager final decision (BUY/OVERWEIGHT/HOLD/UNDERWEIGHT/SELL). `/trading backtest` runs strategy backtests with 4 built-in strategies. BM25 memory system learns from past trades. Supports US/HK/A-share stocks and 20+ cryptos. |
 | Monitor | `/monitor` (no args → wizard) subscribes to AI-monitored topics on a schedule and pushes reports to Telegram/Slack/console. Topics: `ai_research` (arxiv), `stock_<TICKER>`, `crypto_<SYMBOL>`, `world_news` (Reuters/BBC/AP), `custom:<query>`. Schedules: 15m to weekly. Background scheduler daemon with `/monitor start/stop/status`. |
 | Autonomous Agents | `/agent` (no args → wizard) launches autonomous background agent loops driven by Markdown task templates. 4 built-in templates: `research_assistant`, `auto_bug_fixer`, `paper_writer`, `auto_coder`. Iteration summaries pushed via bridge. Custom templates: drop a `.md` file into `~/.cheetahclaws/agent_templates/`. |
 | Remote Control job queue | All three bridges (Telegram/Slack/WeChat) maintain a per-bridge FIFO job queue when the AI is busy. `!jobs` / `!j` — dashboard; `!job <id>` — detail; `!retry <id>` — re-run a failed job; `!cancel [id]` — stop current job. Tool step tracking with `on_tool_start`/`on_tool_end` hooks. Persistent log at `~/.cheetahclaws/jobs.json`. |
@@ -511,6 +514,7 @@ pip install ".[autosuggest]"        # typing-time slash command autosuggest (pro
 pip install ".[browser]"            # headless browser for JS-rendered pages (playwright)
 pip install ".[files]"              # PDF + Excel reading (pymupdf, openpyxl)
 pip install ".[ocr]"                # image OCR (pytesseract, Pillow)
+pip install ".[trading]"            # trading agent (yfinance, rank-bm25)
 pip install ".[all]"                # everything above
 ```
 
@@ -846,6 +850,55 @@ cheetahclaws --model qwen:qwen-max
 
 ---
 
+## Trading Agent
+
+CheetahClaws includes a built-in AI-powered trading analysis and backtesting module. Install trading dependencies:
+
+```bash
+pip install "cheetahclaws[trading]"
+```
+
+### Multi-agent analysis
+
+```bash
+/trading analyze NVDA
+```
+
+Runs a 5-phase pipeline: **data collection** (technical indicators, fundamentals, news) → **Bull/Bear researcher debate** → **research judge** recommendation → **risk management panel** (aggressive / conservative / neutral) → **portfolio manager** final decision with a 5-tier rating: `BUY / OVERWEIGHT / HOLD / UNDERWEIGHT / SELL`.
+
+Each agent uses BM25 memory to recall similar past situations and learns from outcomes via post-trade reflection.
+
+### Backtesting
+
+```bash
+/trading backtest AAPL dual_ma           # single strategy
+/trading backtest TSLA                   # AI picks best strategy
+```
+
+4 built-in strategies: `dual_ma` (SMA crossover), `rsi_mean_reversion`, `bollinger_breakout`, `macd_crossover`. Engines for US/HK equities and crypto. Reports Sharpe, Sortino, Calmar, max drawdown, win rate, profit factor.
+
+### SSJ integration
+
+`/ssj` → **14. 📈 Trading** opens a guided sub-menu:
+
+| Option | Action |
+|---|---|
+| a. Quick Analyze | Full multi-agent analysis for any symbol |
+| b. Backtest | Pick strategy or compare all 4 |
+| c. Price Check | Current price + key metrics |
+| d. Indicators | 11 technical indicators report |
+| e. Trading Bot | Autonomous multi-symbol analysis |
+| f. History | Past trading decisions |
+| g. Memory | Trading memory status |
+
+### Supported markets
+
+US stocks (`AAPL`), HK stocks (`0700.HK`), A-shares (`000001.SZ`), crypto (`BTC`, `ETH`, + 18 more). Data sources with automatic fallback chains — no API keys required.
+
+> **Full guide:** [docs/guides/trading.md](docs/guides/trading.md)
+
+---
+
 ## Documentation
 
 Detailed guides have been moved to [`docs/guides/`](docs/guides/) to keep this README focused. Click any link below:
@@ -856,6 +909,7 @@ Detailed guides have been moved to [`docs/guides/`](docs/guides/) to keep this R
 | [**Extensions**](docs/guides/extensions.md) | Memory system, Skills, Sub-Agents, MCP servers, Plugin system, Monitor subscriptions, Autonomous Agents |
 | [**Bridges**](docs/guides/bridges.md) | Telegram, WeChat, Slack setup and remote control from your phone |
 | [**Voice & Video**](docs/guides/voice-and-video.md) | Voice input (offline Whisper), Video Content Factory, TTS Content Factory |
+| [**Trading**](docs/guides/trading.md) | Multi-agent analysis (Bull/Bear debate, Risk panel, PM), backtesting (4 strategies, equity + crypto engines), BM25 memory, data fallback chains, SSJ integration |
 | [**Advanced**](docs/guides/advanced.md) | Brainstorm, SSJ Developer Mode, Tmux, Proactive monitoring, Checkpoints, Plan mode, Session management, Cloud sync |
 | [**Recipes**](docs/guides/recipes.md) | 12 step-by-step examples: code review, Telegram remote control, autonomous research, bug fix, brainstorm, session search, browse web pages, email, PDF/Excel analysis, and more |
 | [**Plugin Authoring**](docs/guides/plugin-authoring.md) | Build your own plugin: tools, commands, skills, MCP servers, publishing checklist |
