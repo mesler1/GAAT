@@ -64,11 +64,20 @@ Slash commands in REPL:
   /agent stop <name>    Stop a running agent
   /agent list           List running agents
   /agent templates      List available task templates
-  /ssj              SSJ Developer Mode — power menu (brainstorm, debate, worker, review…)
+  /ssj              SSJ Developer Mode — power menu (brainstorm, debate, worker, trading, review…)
+  /trading analyze <SYMBOL>   Multi-agent analysis (Bull/Bear debate → Risk panel → PM decision)
+  /trading backtest <SYM> [strategy]  Backtest a strategy (dual_ma, rsi_mean_reversion, bollinger_breakout, macd_crossover)
+  /trading price <SYMBOL>     Current price and key metrics
+  /trading indicators <SYMBOL>  Technical indicators report (SMA, RSI, MACD, Bollinger, ADX…)
+  /trading status             Trading memory status
+  /trading history            Past trading decisions
+  /trading memory [action]    Manage trading memory (list, search, clear)
   /image [prompt]   Send clipboard image to vision model
+  /video [topic]    AI video content factory — story → TTS → images → subtitles → MP4
   /voice            Record voice input, transcribe, and submit
   /voice status     Show available recording and STT backends
   /voice lang <code>  Set STT language (e.g. zh, en, ja — default: auto)
+  /tts              AI text-to-speech wizard — script → MP3 in any voice style
   /proactive [dur]  Background sentinel polling (e.g. /proactive 5m)
   /proactive off    Disable proactive polling
   /cloudsave setup <token>   Configure GitHub token for cloud sync
