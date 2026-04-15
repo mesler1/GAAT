@@ -624,7 +624,7 @@ def cmd_telegram(args: str, _state, config) -> bool:
            /telegram status                  — show current status
     """
     global _telegram_thread, _telegram_stop
-    from config import save_config
+    from cc_config import save_config
 
     parts = args.strip().split()
 

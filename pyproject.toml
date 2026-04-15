@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cheetahclaws"
-version = "3.05.70"
+version = "3.05.71"
 description = "CheetahClaws: A Fast, Hackable Python AI Coding Assistant"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -34,7 +34,7 @@ py-modules = [
     "circuit_breaker",
     "cloudsave",
     "compaction",
-    "config",
+    "cc_config",
     "context",
     "health",
     "jobs",

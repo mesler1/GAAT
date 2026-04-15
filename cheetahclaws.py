@@ -546,7 +546,7 @@ def setup_readline(history_file: Path):
 # ── Main REPL ──────────────────────────────────────────────────────────────
 
 def repl(config: dict, initial_prompt: str = None):
-    from config import HISTORY_FILE
+    from cc_config import HISTORY_FILE
     from context import build_system_prompt
     from agent import AgentState, run, TextChunk, ThinkingChunk, ToolStart, ToolEnd, TurnDone, PermissionRequest
 
@@ -1422,7 +1422,7 @@ def main():
         print(__doc__)
         sys.exit(0)
 
-    from config import load_config, save_config, has_api_key
+    from cc_config import load_config, save_config, has_api_key
     from providers import detect_provider, PROVIDERS
 
     config = load_config()
@@ -1450,7 +1450,7 @@ def main():
         config["thinking"] = True
 
     # ── Setup wizard: --setup flag or first-run auto-trigger ─────────────
-    from config import CONFIG_FILE
+    from cc_config import CONFIG_FILE
     is_first_run = not CONFIG_FILE.exists() or os.path.getsize(CONFIG_FILE) < 5
     if args.setup or (is_first_run and sys.stdin.isatty() and not args.print_mode):
         run_setup_wizard(config)

@@ -91,6 +91,14 @@ English | [中文](https://github.com/SafeRL-Lab/clawspring/blob/main/docs/READM
 ## 🔥🔥🔥 News (Pacific Time)
 
  
+- Apr 15, 2026 (**v3.05.71**): **Plugin docs, example template, config namespace fix, typing-time autosuggest**
+  - **Plugin authoring guide** (`docs/guides/plugin-authoring.md`) — full guide for building third-party plugins: tools (`TOOL_DEFS`), commands (`COMMAND_DEFS`), skills, MCP servers, manifest format, testing, publishing checklist, and common mistakes.
+  - **Example plugin template** (`examples/example-plugin/`) — copy-and-edit starter with working tools (`ExampleSearch`, `ExampleStatus`), command (`/example` with subcommands), skill, and `plugin.json` manifest.
+  - **Fix `config` namespace collision** — renamed `config.py` to `cc_config.py` to avoid conflict with system `config` namespace packages. `pip install -e .` followed by `cheetahclaws` from outside the project directory no longer crashes with `ImportError`.
+  - **Typing-time autosuggest** (PR #38 by @honghua) — optional `prompt_toolkit` integration for inline ghost suggestions and keyboard-selectable completion menu while typing slash commands. Install with `pip install cheetahclaws[autosuggest]`. Falls back to readline when not installed. Env var `CHEETAH_PT_INPUT=0` to opt out.
+  - **Python 3.10-3.13 compat fix** (PR #38) — `Path.read_text(newline=)` in `tools/fs.py` replaced with portable `open()` helper (the `newline=` kwarg is 3.14+ only).
+  - **Version bumped to 3.05.71.**
+
 - Apr 14, 2026 (**v3.05.70**): **Setup wizard, Ollama UX, context indicator, and session robustness**
   - **Interactive setup wizard** (`commands/core.py`, `cheetahclaws.py`) — `cheetahclaws --setup` or `/setup` launches a guided setup: pick from 6 providers (Ollama, Anthropic, OpenAI, Gemini, DeepSeek, custom), auto-detect env vars, set API key, verify connection. Auto-triggers on first run (no `config.json`). API key missing warning now suggests `--setup`.
   - **Ollama UX improvements** — `/model` now shows live local Ollama models (via `/api/tags`) instead of a hardcoded list. `/model ollama` triggers the interactive model picker. Connection failures and 404 errors now give actionable messages ("Is Ollama running?", "Pull it with: ollama pull ..."). Tool-calling fallback message clarified.

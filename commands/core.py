@@ -58,7 +58,7 @@ def cmd_context(_args: str, state, config) -> bool:
 
 
 def cmd_cost(_args: str, state, config) -> bool:
-    from config import calc_cost
+    from cc_config import calc_cost
     cost = calc_cost(config["model"],
                      state.total_input_tokens,
                      state.total_output_tokens)
@@ -434,7 +434,7 @@ def cmd_doctor(args: str, state, config) -> bool:
 
 def run_setup_wizard(config: dict) -> None:
     """Interactive first-run setup: pick provider, set API key, verify."""
-    from config import save_config
+    from cc_config import save_config
     from providers import PROVIDERS, detect_provider, get_api_key
 
     print()

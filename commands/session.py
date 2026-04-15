@@ -61,7 +61,7 @@ def _build_session_data(state, session_id: str | None = None) -> dict:
 # ── /save ──────────────────────────────────────────────────────────────────
 
 def cmd_save(args: str, state, config) -> bool:
-    from config import SESSIONS_DIR
+    from cc_config import SESSIONS_DIR
     import uuid
     sid   = uuid.uuid4().hex[:8]
     ts    = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -77,7 +77,7 @@ def cmd_save(args: str, state, config) -> bool:
 
 def save_latest(args: str, state, config=None) -> bool:
     """Save session on exit: session_latest.json + daily/ copy + append to history.json."""
-    from config import MR_SESSION_DIR, DAILY_DIR, SESSION_HIST_FILE
+    from cc_config import MR_SESSION_DIR, DAILY_DIR, SESSION_HIST_FILE
     if not state.messages:
         return True
 
@@ -148,7 +148,7 @@ def save_latest(args: str, state, config=None) -> bool:
 # ── /load ──────────────────────────────────────────────────────────────────
 
 def cmd_load(args: str, state, config) -> bool:
-    from config import SESSIONS_DIR, MR_SESSION_DIR, DAILY_DIR
+    from cc_config import SESSIONS_DIR, MR_SESSION_DIR, DAILY_DIR
     from tools import ask_input_interactive
 
     path = None
@@ -189,7 +189,7 @@ def cmd_load(args: str, state, config) -> bool:
             print(clr(f"  [{i+1:2d}] ", "yellow") + label)
             menu_buf += "\n" + clr(f"  [{i+1:2d}] ", "yellow") + label
 
-        from config import SESSION_HIST_FILE
+        from cc_config import SESSION_HIST_FILE
         has_history = SESSION_HIST_FILE.exists()
         if has_history:
             try:
@@ -309,7 +309,7 @@ def cmd_load(args: str, state, config) -> bool:
 # ── /resume ────────────────────────────────────────────────────────────────
 
 def cmd_resume(args: str, state, config) -> bool:
-    from config import MR_SESSION_DIR
+    from cc_config import MR_SESSION_DIR
 
     if not args.strip():
         path = MR_SESSION_DIR / "session_latest.json"
@@ -331,7 +331,7 @@ def cmd_resume(args: str, state, config) -> bool:
         err(f"Session file is corrupted: {path}")
         warn(f"  JSON error: {e}")
         # Try falling back to daily backups
-        from config import DAILY_DIR
+        from cc_config import DAILY_DIR
         daily_files = sorted(DAILY_DIR.rglob("session_*.json"), key=lambda f: f.stat().st_mtime, reverse=True)
         if daily_files:
             warn(f"  Try loading a recent backup: /load {daily_files[0]}")
@@ -390,7 +390,7 @@ def cmd_cloudsave(args: str, state, config) -> bool:
     /cloudsave load <gist_id>  — download and load a session from Gist
     """
     from cloudsave import validate_token, upload_session, list_sessions, download_session
-    from config import save_config
+    from cc_config import save_config
 
     parts = args.strip().split(None, 1)
     sub = parts[0].lower() if parts else ""
@@ -499,7 +499,7 @@ def cmd_exit(_args: str, _state, config) -> bool:
     if config.get("cloudsave_auto") and config.get("gist_token") and _state.messages:
         info("Auto cloud-sync: uploading session to Gist…")
         from cloudsave import upload_session
-        from config import save_config
+        from cc_config import save_config
         session_data = _build_session_data(_state)
         gist_id, err_msg = upload_session(
             session_data, config["gist_token"],

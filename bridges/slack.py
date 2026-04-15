@@ -580,7 +580,7 @@ def cmd_slack(args: str, _state, config) -> bool:
       /slack logout                — clear saved credentials
     """
     global _slack_thread, _slack_stop
-    from config import save_config
+    from cc_config import save_config
 
     parts = args.strip().split()
 

@@ -250,7 +250,7 @@ def _cmd_monitor_wizard(config: dict) -> None:
     """Full interactive setup wizard — zero prior knowledge required."""
     from monitor.store import list_subscriptions, add_subscription, remove_subscription
     from monitor import scheduler as _sched
-    from config import save_config
+    from cc_config import save_config
 
     _BORDER = clr("─" * 52, "dim")
 
@@ -460,7 +460,7 @@ def _wizard_remove_subscription(config: dict, subs: list) -> None:
 
 def _wizard_configure_notifications(config: dict) -> None:
     """Walk through Telegram / Slack setup."""
-    from config import save_config
+    from cc_config import save_config
 
     print()
     print(clr("  Push notification setup:", "bold"))
@@ -611,7 +611,7 @@ def _cmd_monitor_status(config: dict) -> None:
 
 
 def _cmd_monitor_set(args: str, config: dict) -> None:
-    from config import save_config
+    from cc_config import save_config
 
     parts = args.split()
     if not parts:
