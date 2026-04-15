@@ -113,9 +113,6 @@ English | [中文](https://github.com/SafeRL-Lab/clawspring/blob/main/docs/READM
   - **Tool module reorganization** — 7 top-level `tools_*.py` files consolidated into a `tools/` package (`tools/security.py`, `tools/fs.py`, `tools/shell.py`, `tools/web.py`, `tools/notebook.py`, `tools/diagnostics.py`, `tools/interaction.py`). All existing `from tools import ...` code continues to work unchanged via `tools/__init__.py`.
   - **Version bumped to 3.05.68.**
 
-- Apr 14, 2026 (**v3.05.67**): **Packaging fix, `/config` safety, and readline completion fix** — Fixed `ModuleNotFoundError` on install (#36), secrets filtering in `/config`, readline completion.
-
-
 
 
 
