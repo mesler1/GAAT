@@ -119,6 +119,35 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, Union
 
+
+# ── Safe stdio wrapper (prevents BrokenPipeError in daemon/bridge mode) ──
+class _SafeWriter:
+    """Wraps stdout/stderr to silently handle broken pipes and closed fds."""
+    __slots__ = ("_inner",)
+
+    def __init__(self, inner):
+        self._inner = inner
+
+    def write(self, data):
+        try:
+            return self._inner.write(data)
+        except (BrokenPipeError, OSError, ValueError):
+            return len(data) if isinstance(data, str) else 0
+
+    def flush(self):
+        try:
+            self._inner.flush()
+        except (BrokenPipeError, OSError, ValueError):
+            pass
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+sys.stdout = _SafeWriter(sys.stdout)
+sys.stderr = _SafeWriter(sys.stderr)
+
+
 # ── UI / rendering ─────────────────────────────────────────────────────────
 from ui.render import (
     C, clr, info, ok, warn, err, _truncate_err_global,
@@ -145,7 +174,7 @@ from bridges.slack    import cmd_slack, _slack_start_bridge
 
 # ── Session commands ───────────────────────────────────────────────────────
 from commands.session import (
-    cmd_save, cmd_load, cmd_resume, cmd_history,
+    cmd_save, cmd_load, cmd_resume, cmd_history, cmd_search,
     cmd_cloudsave, cmd_exit, save_latest,
 )
 
@@ -295,6 +324,7 @@ COMMANDS = {
     "save":        cmd_save,
     "load":        cmd_load,
     "history":     cmd_history,
+    "search":      cmd_search,
     "context":     cmd_context,
     "cost":        cmd_cost,
     "verbose":     cmd_verbose,
@@ -428,6 +458,7 @@ _CMD_META: dict[str, tuple[str, list[str]]] = {
     "save":        ("Save session to file",               []),
     "load":        ("Load a saved session",               []),
     "history":     ("Show conversation history",          []),
+    "search":      ("Search past sessions",               []),
     "context":     ("Show token-context usage",           []),
     "cost":        ("Show cost estimate",                 []),
     "verbose":     ("Toggle verbose output",              []),
@@ -827,25 +858,12 @@ def repl(config: dict, initial_prompt: str = None):
                                 state.messages.pop()
                             return run_query(user_input, is_background)
                         return
-                # ── Actionable error messages for common API failures ─────
-                err_str = str(e).lower()
-                err_cls = type(e).__name__
-                hint = ""
-                if "auth" in err_cls.lower() or "authentication" in err_str or "invalid.*api.key" in err_str or "401" in err_str:
-                    hint = "Check your API key: /config or set the appropriate env var (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.)"
-                elif isinstance(e, (ConnectionError, OSError)) or "connection" in err_str or isinstance(e, urllib.error.URLError):
-                    hint = "Network error — check your internet connection or the API endpoint URL."
-                    if "ollama" in err_str or "localhost" in err_str or "11434" in err_str:
-                        hint = "Cannot connect to Ollama. Is it running? Start with: ollama serve"
-                elif "rate_limit" in err_str or "rate limit" in err_str or err_cls == "RateLimitError":
-                    hint = "Rate limited by the API. Wait a moment and retry."
-                elif "not_found" in err_str or "model" in err_str and "not found" in err_str or "does not exist" in err_str:
-                    hint = f"Model '{config.get('model', '?')}' not found. Check available models with /model"
-                elif "insufficient" in err_str and ("quota" in err_str or "balance" in err_str or "credit" in err_str):
-                    hint = "Insufficient API credits. Check your billing at your provider's dashboard."
-                err(f"Error: {err_cls}: {_truncate_err_global(str(e))}")
-                if hint:
-                    warn(f"Hint: {hint}")
+                # ── Actionable error messages via error classifier ────────
+                from error_classifier import classify as _classify_err
+                cerr = _classify_err(e)
+                err(f"Error: {type(e).__name__}: {_truncate_err_global(str(e))}")
+                if cerr.hint:
+                    warn(f"Hint: {cerr.hint}")
                 warn("Your conversation is intact. You can retry or type a new message.")
 
             _stop_tool_spinner()

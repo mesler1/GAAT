@@ -139,6 +139,20 @@ def save_latest(args: str, state, config=None) -> bool:
     except Exception as e:
         warn(f"History update failed: {e}")
 
+    # Also save to SQLite for full-text search
+    try:
+        from session_store import save_session as _db_save
+        _db_save(
+            session_id=sid,
+            messages=data.get("messages", []),
+            model=cfg.get("model", ""),
+            turn_count=data.get("turn_count", 0),
+            input_tokens=data.get("total_input_tokens", 0),
+            output_tokens=data.get("total_output_tokens", 0),
+        )
+    except Exception:
+        pass  # SQLite save is best-effort
+
     ok(f"Session saved → {latest_path}")
     if str(daily_path) != "(skipped)":
         ok(f"             → {daily_path}  (id: {sid})")
@@ -344,6 +358,55 @@ def cmd_resume(args: str, state, config) -> bool:
     state.total_input_tokens = data.get("total_input_tokens", 0)
     state.total_output_tokens = data.get("total_output_tokens", 0)
     ok(f"Session loaded from {path} ({len(state.messages)} messages)")
+    return True
+
+
+# ── /search ────────────────────────────────────────────────────────────────
+
+def cmd_search(args: str, state, config) -> bool:
+    """Full-text search across all saved sessions."""
+    query = args.strip()
+    if not query:
+        info("Usage: /search <query>")
+        info("Search across all past session conversations.")
+        return True
+
+    from session_store import search_sessions, session_count, import_json_sessions
+
+    # Auto-import legacy JSON sessions on first search
+    count = session_count()
+    if count == 0:
+        from cc_config import SESSION_HIST_FILE
+        imported = import_json_sessions(SESSION_HIST_FILE)
+        if imported:
+            info(f"Imported {imported} sessions from history.json into search index.")
+
+    results = search_sessions(query)
+    if not results:
+        info(f"No sessions found matching: \"{query}\"")
+        return True
+
+    info(f"Found {len(results)} session(s) matching \"{query}\":\n")
+    for r in results:
+        sid = r.get("id", "?")
+        title = r.get("title", "") or "(untitled)"
+        date = r.get("saved_at", "?")
+        model = r.get("model", "")
+        snippet = r.get("snippet", "")
+        turns = r.get("turn_count", 0)
+
+        header = clr(f"  [{sid}]", "yellow") + f" {title}"
+        if model:
+            header += clr(f" ({model})", "dim")
+        print(header)
+        print(clr(f"    {date} · {turns} turns", "dim"))
+        if snippet:
+            # Clean up FTS5 snippet markers
+            clean = snippet.replace(">>>", "\033[32m").replace("<<<", "\033[0m")
+            print(f"    {clean}")
+        print()
+
+    info("Load a session with: /load <session_id>")
     return True
 
 

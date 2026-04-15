@@ -138,40 +138,32 @@ def run(
                 return  # circuit manages its own cooldown — don't retry
 
             except Exception as e:
-                if attempt >= max_retries:
+                from error_classifier import classify as _classify_err
+                cerr = _classify_err(e)
+
+                if attempt >= max_retries or not cerr.retryable:
                     _log.error("api_failed", session_id=session_id,
                                error_type=type(e).__name__,
+                               category=cerr.category.value,
                                error=_truncate_err(str(e)))
-                    yield TextChunk(f"\n[Failed after {max_retries} retries — {_truncate_err(str(e))}. Please retry manually.]\n")
-                    break  # give up gracefully instead of crashing
+                    hint = f" Hint: {cerr.hint}" if cerr.hint else ""
+                    yield TextChunk(f"\n[Failed — {type(e).__name__}: {_truncate_err(str(e))}.{hint}]\n")
+                    break
 
-                err_str  = str(e).lower()
-                err_type = type(e).__name__
-
-                is_context_too_long = any(s in err_str for s in [
-                    "context_length", "context window", "too many tokens",
-                    "input is too long", "prompt is too long",
-                    "request too large", "token limit",
-                ])
-                is_overloaded = "overloaded" in err_str or "overloaded_error" in err_type
-                is_rate_limit = "rate_limit" in err_str or e.__class__.__name__ == "RateLimitError"
-
-                if is_context_too_long:
+                if cerr.should_compress:
                     _force_compact(state, config)
                     yield TextChunk(f"\n[Context too long — compacted and retrying (attempt {attempt+1}/{max_retries})]\n")
                     continue
 
-                # All other errors: backoff + retry (overloaded/rate-limit get longer backoff)
-                if is_overloaded or is_rate_limit:
-                    backoff = min(30, 2 ** (attempt + 2))  # 4s, 8s, 16s
-                else:
-                    backoff = 2 ** (attempt + 1)  # 2s, 4s, 8s
+                backoff = int(2 ** (attempt + 1) * cerr.backoff_multiplier)
+                backoff = min(backoff, 30)
                 _log.warn("api_retry", session_id=session_id,
                           attempt=attempt + 1, max_retries=max_retries,
-                          error_type=err_type,
+                          category=cerr.category.value,
+                          error_type=type(e).__name__,
                           error=_truncate_err(str(e)),
                           backoff_s=backoff)
-                yield TextChunk(f"\n[Retry {attempt+1}/{max_retries} after {backoff}s — {err_type}: {_truncate_err(str(e))}]\n")
+                yield TextChunk(f"\n[Retry {attempt+1}/{max_retries} after {backoff}s — {cerr.category.value}: {_truncate_err(str(e))}]\n")
                 time.sleep(backoff)
 
         if assistant_turn is None:
@@ -191,23 +183,40 @@ def run(
         if not assistant_turn.tool_calls:
             break   # No tools → conversation turn complete
 
-        # ── Execute tools ────────────────────────────────────────────────
-        for tc in assistant_turn.tool_calls:
-            yield ToolStart(tc["name"], tc["input"])
-            _log.debug("tool_start", session_id=session_id,
-                       tool=tc["name"], input_keys=list(tc["input"].keys()))
+        # ── Execute tools (parallel when safe) ────────────────────────────
+        tool_calls = assistant_turn.tool_calls
 
-            # Permission gate
+        # Check permissions first (must be sequential — may prompt user)
+        permissions: dict[str, bool] = {}
+        for tc in tool_calls:
             permitted = _check_permission(tc, config)
             if not permitted:
                 if config.get("permission_mode") == "plan":
-                    # Plan mode: silently deny writes (no user prompt)
                     permitted = False
                 else:
                     req = PermissionRequest(description=_permission_desc(tc))
                     yield req
                     permitted = req.granted
+            permissions[tc["id"]] = permitted
 
+        # Determine which tools can run in parallel
+        from tool_registry import get_tool as _get_tool
+        parallel_batch = []
+        sequential_batch = []
+        for tc in tool_calls:
+            if not permissions[tc["id"]]:
+                sequential_batch.append(tc)
+                continue
+            tdef = _get_tool(tc["name"])
+            if tdef and tdef.concurrent_safe and len(tool_calls) > 1:
+                parallel_batch.append(tc)
+            else:
+                sequential_batch.append(tc)
+
+        def _exec_one(tc):
+            """Execute a single tool call, return (tc, result, permitted)."""
+            tid = tc["id"]
+            permitted = permissions[tid]
             if not permitted:
                 if config.get("permission_mode") == "plan":
                     plan_file = runtime.get_ctx(config).plan_file or ""
@@ -221,16 +230,41 @@ def run(
             else:
                 result = execute_tool(
                     tc["name"], tc["input"],
-                    permission_mode="accept-all",  # already gate-checked above
+                    permission_mode="accept-all",
                     config=config,
                 )
+            return tc, result, permitted
 
+        results_ordered = []
+
+        # Run parallel batch concurrently
+        if parallel_batch:
+            from concurrent.futures import ThreadPoolExecutor
+            for tc in parallel_batch:
+                yield ToolStart(tc["name"], tc["input"])
+            with ThreadPoolExecutor(max_workers=min(len(parallel_batch), 8)) as pool:
+                futures = {pool.submit(_exec_one, tc): tc for tc in parallel_batch}
+                for future in futures:
+                    tc, result, permitted = future.result()
+                    _log.debug("tool_end", session_id=session_id,
+                               tool=tc["name"], permitted=permitted,
+                               result_len=len(result))
+                    results_ordered.append((tc, result, permitted))
+
+        # Run sequential batch one by one
+        for tc in sequential_batch:
+            yield ToolStart(tc["name"], tc["input"])
+            _log.debug("tool_start", session_id=session_id,
+                       tool=tc["name"], input_keys=list(tc["input"].keys()))
+            tc, result, permitted = _exec_one(tc)
             _log.debug("tool_end", session_id=session_id,
                        tool=tc["name"], permitted=permitted,
                        result_len=len(result))
-            yield ToolEnd(tc["name"], result, permitted)
+            results_ordered.append((tc, result, permitted))
 
-            # Append tool result in neutral format
+        # Yield results and append to state in original order
+        for tc, result, permitted in results_ordered:
+            yield ToolEnd(tc["name"], result, permitted)
             state.messages.append({
                 "role":         "tool",
                 "tool_call_id": tc["id"],

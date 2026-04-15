@@ -91,6 +91,19 @@ English | [中文](https://github.com/SafeRL-Lab/clawspring/blob/main/docs/READM
 ## 🔥🔥🔥 News (Pacific Time)
 
  
+- Apr 15, 2026 (**v3.05.72**): **Error classifier, parallel tools, prompt injection detection, SQLite sessions, tool cache, auxiliary model, safe stdio**
+  - **Error classifier** (`error_classifier.py`) — centralized API error taxonomy (auth, billing, rate_limit, context_overflow, model_not_found, overloaded, connection, timeout) with per-category recovery hints, retryability, and backoff multipliers. Replaces fragile string matching in `agent.py` and `cheetahclaws.py`.
+  - **Parallel tool execution** (`agent.py`) — when the LLM returns multiple tool calls, `concurrent_safe=True` tools (Read, Glob, Grep, WebSearch, etc.) now run in parallel via ThreadPoolExecutor (up to 8 workers). Write tools remain sequential. Permission checks are still serial.
+  - **Prompt injection detection** (`context.py`) — CLAUDE.md files are scanned for 8 threat patterns (e.g., "ignore previous instructions", "system prompt override", credential exfiltration via curl/echo) before injection into the system prompt. Detected files are excluded with a security warning.
+  - **SQLite session store + full-text search** (`session_store.py`) — sessions are now saved to SQLite (WAL mode) alongside JSON files. FTS5 index enables `/search <query>` to find past conversations by content. Auto-imports legacy `history.json` on first search.
+  - **Tool result cache** (`tool_registry.py`) — read-only tools cache results by `sha256(name + params)`, LRU eviction at 64 entries. Write tools (Write, Edit, Bash, NotebookEdit) invalidate the cache automatically. Eliminates redundant file reads in agent loops.
+  - **Auxiliary model routing** (`auxiliary.py`) — side tasks (context compression, summarization) now route to a fast/cheap model (Gemini Flash, GPT-4o-mini, etc.) instead of the primary model. Auto-detects from available API keys. Configurable via `auxiliary_model` in config.
+  - **Auto-discovery tool loading** (`tools/__init__.py`) — extension modules loaded via `_EXTENSION_MODULES` list + `__import__()` loop instead of manual import statements. Adding a new extension is one line.
+  - **Safe stdio wrapper** (`cheetahclaws.py`) — `sys.stdout`/`sys.stderr` wrapped with `_SafeWriter` that silently handles `BrokenPipeError` and closed file descriptors. Prevents crashes when terminal disconnects during bridge/daemon operation.
+  - **One-line installer** (`scripts/install.sh`) — `curl -fsSL .../install.sh | bash` handles platform detection (Linux/macOS/WSL2/Termux), Python/git/pip checks, clone, install, and PATH setup. First run triggers the setup wizard automatically.
+  - **Contributing section** in README with quick-start commands for contributors, linking to CONTRIBUTING.md and Plugin Authoring Guide.
+  - **Version bumped to 3.05.72.**
+
 - Apr 15, 2026 (**v3.05.71**): **Plugin docs, example template, config namespace fix, typing-time autosuggest**
   - **Plugin authoring guide** (`docs/guides/plugin-authoring.md`) — full guide for building third-party plugins: tools (`TOOL_DEFS`), commands (`COMMAND_DEFS`), skills, MCP servers, manifest format, testing, publishing checklist, and common mistakes.
   - **Example plugin template** (`examples/example-plugin/`) — copy-and-edit starter with working tools (`ExampleSearch`, `ExampleStatus`), command (`/example` with subcommands), skill, and `plugin.json` manifest.
@@ -146,6 +159,7 @@ CheetahClaws: **A Lightweight** and **Easy-to-Use** Python Reimplementation of C
   * [Usage: Open-Source Models (Local)](#usage-open-source-models-local)
   * [Model Name Format](#model-name-format)
   * [Documentation](#documentation) (guides for all features)
+  * [Contributing](#contributing)
   * [FAQ](#faq)
   * [Citation](#citation)
 
@@ -164,7 +178,7 @@ Claude Code is a powerful, production-grade AI coding assistant — but its sour
 |-----------|--------------------------|---------------------------|
 | Language | TypeScript + React/Ink | Python 3.8+ |
 | Source files | ~1,332 TS/TSX files | ~85 Python files |
-| Lines of code | ~283K | ~12K |
+| Lines of code | ~283K | ~40K |
 | Built-in tools | 44+ | 27 |
 | Slash commands | 88 | 36 |
 | Voice input | Proprietary Anthropic WebSocket (OAuth required) | Local Whisper / OpenAI API — works offline, no subscription |
@@ -415,7 +429,28 @@ Claude Code is a powerful, production-grade AI coding assistant — but its sour
 
 ## Installation
 
-### Recommended: install as a global command with `uv`
+### Quick Install (one command)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SafeRL-Lab/cheetahclaws/main/scripts/install.sh | bash
+```
+
+Works on **Linux, macOS, WSL2, and Android (Termux)**. The installer checks for Python 3.10+, clones the repo, installs via pip, and adds `cheetahclaws` to your PATH.
+
+After installation:
+
+```bash
+source ~/.bashrc    # reload shell (or: source ~/.zshrc)
+cheetahclaws        # start chatting!
+```
+
+First run will guide you through setup (pick provider, set API key). Or run `cheetahclaws --setup` anytime.
+
+> **Windows:** Native Windows is not supported. Install [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) and run the command above inside WSL.
+
+---
+
+### Alternative: install with `uv`
 
 [uv](https://docs.astral.sh/uv/) installs `cheetahclaws` into an isolated environment and puts it on your PATH so you can run it from anywhere:
 
@@ -767,12 +802,12 @@ Detailed guides have been moved to [`docs/guides/`](docs/guides/) to keep this R
 
 | Guide | What's Inside |
 |-------|---------------|
-| [**Reference**](docs/guides/reference.md) | CLI options, all 36+ slash commands, API key configuration, permission system, 27 built-in tools |
+| [**Reference**](docs/guides/reference.md) | CLI options, all 36+ slash commands, API key config, permission system, 27 built-in tools, session search, auxiliary model, error classification, prompt injection detection, tool cache, parallel tools |
 | [**Extensions**](docs/guides/extensions.md) | Memory system, Skills, Sub-Agents, MCP servers, Plugin system, Monitor subscriptions, Autonomous Agents |
 | [**Bridges**](docs/guides/bridges.md) | Telegram, WeChat, Slack setup and remote control from your phone |
 | [**Voice & Video**](docs/guides/voice-and-video.md) | Voice input (offline Whisper), Video Content Factory, TTS Content Factory |
 | [**Advanced**](docs/guides/advanced.md) | Brainstorm, SSJ Developer Mode, Tmux, Proactive monitoring, Checkpoints, Plan mode, Session management, Cloud sync |
-| [**Recipes**](docs/guides/recipes.md) | Step-by-step examples: code review with Ollama, Telegram remote control, autonomous research, bug fix workflow |
+| [**Recipes**](docs/guides/recipes.md) | 9 step-by-step examples: code review with Ollama, Telegram remote control, autonomous research, bug fix, brainstorm, session search, and more |
 | [**Plugin Authoring**](docs/guides/plugin-authoring.md) | Build your own plugin: tools, commands, skills, MCP servers, publishing checklist |
 | [**Example Plugin**](examples/example-plugin/) | Copy-and-edit starter template with working tools, commands, and skills |
 | [**Contributing**](CONTRIBUTING.md) | Project structure, architecture guide, PR checklist |
@@ -818,6 +853,26 @@ cheetahclaws --thinking --verbose
 See [Reference Guide](docs/guides/reference.md) for the full list of 36+ slash commands, tool descriptions, and configuration options.
 
 ---
+
+## Contributing
+
+We welcome contributions! See the [Contributing Guide](CONTRIBUTING.md) for project architecture, code conventions, and PR checklist.
+
+Quick start for contributors:
+
+```bash
+git clone https://github.com/SafeRL-Lab/cheetahclaws.git
+cd cheetahclaws
+pip install -r requirements.txt
+pip install pytest
+python -m pytest tests/ -x -q       # 341+ tests should pass
+python cheetahclaws.py               # run the REPL
+```
+
+Building a plugin? See the [Plugin Authoring Guide](docs/guides/plugin-authoring.md) and the [example plugin template](examples/example-plugin/).
+
+---
+
 ## FAQ
 
 **Q: How do I add an MCP server?**

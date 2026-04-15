@@ -191,8 +191,41 @@ This creates a `CLAUDE.md` file that CheetahClaws reads on every startup — con
 
 ---
 
+## 9. Search Past Conversations
+
+Find anything you discussed in previous sessions:
+
+```
+[project] » /search authentication bug
+```
+
+Output:
+```
+Found 2 session(s) matching "authentication bug":
+
+  [a3f8c2e1] Auth refactor (gpt-4o)
+    2026-04-14 15:30:22 · 12 turns
+    How do I fix the >>>authentication<<< >>>bug<<< in login.py?
+
+  [c9e2d1b3] Security review (claude-sonnet-4-6)
+    2026-04-10 11:00:00 · 6 turns
+    ...found an >>>authentication<<< >>>bug<<< in the middleware...
+```
+
+Then load and resume:
+```
+[project] » /load a3f8c2e1
+Session loaded from ... (24 messages)
+[project] » Continue where we left off with the auth fix.
+```
+
+**Tip:** Sessions are automatically indexed. Your first `/search` will import all existing JSON sessions into the search index.
+
+---
+
 ## Tips
 
+- **`/search <query>`** — full-text search across all past sessions
 - **`/status`** — quick overview: model, token usage, cost, session stats
 - **`/doctor`** — diagnose connectivity, dependencies, and configuration issues
 - **`/compact`** — manually compress conversation when context gets large

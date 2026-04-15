@@ -424,3 +424,118 @@ Claude:
 
 ---
 
+## Session Search
+
+Search across all past conversations using full-text search (powered by SQLite FTS5).
+
+```
+/search authentication bug
+/search database migration
+/search "React Server Components"
+```
+
+Output shows matching sessions with highlighted snippets:
+
+```
+  [a3f8c2e1] Auth refactor (gpt-4o)
+    2026-04-14 15:30:22 · 12 turns
+    How do I fix the >>>authentication<<< bug in login.py?
+
+  [b7d4e9f0] DB migration plan (ollama/qwen)
+    2026-04-13 09:15:00 · 8 turns
+    ...>>>database<<< migration strategy for PostgreSQL...
+```
+
+Load any result with `/load <session_id>`.
+
+Sessions are automatically indexed when saved. Legacy JSON sessions are auto-imported on first search.
+
+---
+
+## Auxiliary Model
+
+Side tasks like context compression use a fast, cheap model instead of your primary model. This saves cost and speeds up compaction.
+
+**Auto-detection order** (first available wins):
+1. `config["auxiliary_model"]` (if explicitly set)
+2. Gemini 2.0 Flash (`GEMINI_API_KEY`)
+3. GPT-4o-mini (`OPENAI_API_KEY`)
+4. DeepSeek Chat (`DEEPSEEK_API_KEY`)
+5. Claude Haiku (`ANTHROPIC_API_KEY`)
+6. Qwen Turbo (`DASHSCOPE_API_KEY`)
+7. GLM-4 Flash (`ZHIPU_API_KEY`)
+8. Your primary model (fallback)
+
+**Manual override:**
+```
+/config auxiliary_model=gemini/gemini-2.0-flash
+```
+
+---
+
+## Error Classification
+
+API errors are automatically classified into categories with specific recovery actions:
+
+| Category | Examples | Recovery |
+|----------|----------|----------|
+| `auth` | Invalid API key, 401/403 | Stop retrying, show hint |
+| `billing` | Insufficient credits, 402 | Stop retrying, show hint |
+| `rate_limit` | Too many requests, 429 | Retry with 3x backoff |
+| `context_overflow` | Context too long | Auto-compact, then retry |
+| `model_not_found` | Model does not exist, 404 | Stop retrying, suggest /model |
+| `overloaded` | Server busy, 503 | Retry with 3x backoff |
+| `connection` | Network error, refused | Retry with normal backoff |
+| `timeout` | Request timed out | Retry with normal backoff |
+
+Non-retryable errors (auth, billing, model_not_found) fail immediately with an actionable hint instead of wasting time on futile retries.
+
+---
+
+## Prompt Injection Detection
+
+CLAUDE.md files are scanned for prompt injection patterns before being included in the system prompt. Detected threats are excluded with a warning.
+
+**Patterns detected:**
+- `ignore previous/all instructions`
+- `system prompt override/replace`
+- `you are now a ...` (identity hijack)
+- `disregard all previous rules`
+- `new instructions:` (injection)
+- `curl ... $API_KEY` (credential exfiltration)
+- `echo/export $SECRET` (env var leak)
+- `base64 encode ... key/token` (obfuscation)
+
+If a CLAUDE.md contains a threat, you'll see:
+```
+[SECURITY WARNING] Potential prompt injection detected in Project CLAUDE.md (/path/to/CLAUDE.md):
+  Pattern: 'ignore all previous instructions'
+  This content has been excluded from the system prompt.
+```
+
+---
+
+## Tool Result Cache
+
+Read-only tools (Read, Glob, Grep, WebSearch, etc.) automatically cache their results within a session. If the AI reads the same file with the same parameters twice, the cached result is returned instantly without re-executing.
+
+- Cache key: `sha256(tool_name + params)`
+- Max entries: 64 (LRU eviction)
+- Write tools (Write, Edit, Bash, NotebookEdit) automatically invalidate the entire cache
+
+This eliminates redundant file reads that waste tokens in multi-step agent loops.
+
+---
+
+## Parallel Tool Execution
+
+When the AI issues multiple tool calls in a single response, tools marked as `concurrent_safe=True` run in parallel (up to 8 threads). This speeds up scenarios like reading multiple files simultaneously.
+
+**Parallel-safe tools:** Read, Glob, Grep, WebSearch, WebFetch, MemorySearch, MemoryList, CheckAgentResult, ListAgentTasks, ListAgentTypes, SkillList, TaskGet, TaskList
+
+**Always sequential:** Write, Edit, Bash, NotebookEdit, Agent (and any tool needing user interaction)
+
+No configuration needed — parallelization is automatic when safe.
+
+---
+

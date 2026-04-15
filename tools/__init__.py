@@ -486,15 +486,24 @@ def _register_builtins() -> None:
 _register_builtins()
 
 
-# ── Extension tools (side-effect imports register them automatically) ─────
+# ── Extension tools (auto-discovery) ─────────────────────────────────────
+# Each module self-registers its tools on import. Failures are best-effort.
 
-import memory.tools      as _memory_tools      # noqa: F401
-import multi_agent.tools as _multiagent_tools  # noqa: F401
+_EXTENSION_MODULES = [
+    "memory.tools",
+    "multi_agent.tools",
+    "skill.tools",
+    "cc_mcp.tools",
+    "task.tools",
+]
+
+for _mod_name in _EXTENSION_MODULES:
+    try:
+        __import__(_mod_name)
+    except Exception:
+        pass  # Extension loading is best-effort; never crash startup
 
 from multi_agent.tools import get_agent_manager as _get_agent_manager  # noqa: F401
-
-import skill.tools as _skill_tools  # noqa: F401
-import cc_mcp.tools   as _mcp_tools    # noqa: F401
 
 try:
     from plugin.loader import register_plugin_tools as _reg_plugin_tools
@@ -502,10 +511,11 @@ try:
 except Exception:
     pass   # Plugin loading is best-effort; never crash startup
 
-import task.tools as _task_tools  # noqa: F401
-
-from checkpoint.hooks import install_hooks as _install_checkpoint_hooks
-_install_checkpoint_hooks()
+try:
+    from checkpoint.hooks import install_hooks as _install_checkpoint_hooks
+    _install_checkpoint_hooks()
+except Exception:
+    pass
 
 # ── Plan mode tools (EnterPlanMode / ExitPlanMode) ────────────────────────
 

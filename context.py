@@ -1,10 +1,36 @@
 """System context: CLAUDE.md, git info, cwd injection."""
 import os
+import re
 import subprocess
 from pathlib import Path
 from datetime import datetime
 
 from memory import get_memory_context
+
+# ── Prompt injection detection ───────────────────────────────────────────
+_THREAT_PATTERNS = [
+    re.compile(r'ignore\s+(previous|all|above|prior)(\s+\w+)*\s+(instructions?|prompts?|rules?)', re.I),
+    re.compile(r'system\s+prompt\s+(override|replace|change|modify|ignore)', re.I),
+    re.compile(r'you\s+are\s+now\s+(a|an|no\s+longer)', re.I),
+    re.compile(r'disregard\s+(all|any|your)\s+(previous|prior|above)', re.I),
+    re.compile(r'new\s+instructions?\s*:', re.I),
+    re.compile(r'curl\s+[^\n]*\$\{?\w*(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)', re.I),
+    re.compile(r'(cat|echo|print|export)\s+.*\$(ANTHROPIC|OPENAI|API|SECRET|TOKEN)', re.I),
+    re.compile(r'base64\s+(encode|decode).*\b(key|token|secret|password)\b', re.I),
+]
+
+
+def _scan_for_threats(content: str, source: str) -> str | None:
+    """Scan content for prompt injection patterns. Returns warning or None."""
+    for pattern in _THREAT_PATTERNS:
+        match = pattern.search(content)
+        if match:
+            return (
+                f"[SECURITY WARNING] Potential prompt injection detected in {source}:\n"
+                f"  Pattern: {match.group()!r}\n"
+                f"  This content has been excluded from the system prompt."
+            )
+    return None
 
 SYSTEM_PROMPT_TEMPLATE = """\
 You are CheetahClaws, Created by SAIL Lab (Safe AI and Robot Learning Lab at UC Berkeley), an AI coding assistant running in the terminal.
@@ -125,14 +151,23 @@ def get_git_info() -> str:
 
 
 def get_claude_md() -> str:
-    """Load CLAUDE.md from cwd or parents, and ~/.claude/CLAUDE.md."""
+    """Load CLAUDE.md from cwd or parents, and ~/.claude/CLAUDE.md.
+
+    Each file is scanned for prompt injection patterns before inclusion.
+    """
     content_parts = []
+    warnings = []
 
     # Global CLAUDE.md
     global_md = Path.home() / ".claude" / "CLAUDE.md"
     if global_md.exists():
         try:
-            content_parts.append(f"[Global CLAUDE.md]\n{global_md.read_text()}")
+            text = global_md.read_text()
+            threat = _scan_for_threats(text, f"Global CLAUDE.md ({global_md})")
+            if threat:
+                warnings.append(threat)
+            else:
+                content_parts.append(f"[Global CLAUDE.md]\n{text}")
         except Exception:
             pass
 
@@ -142,7 +177,12 @@ def get_claude_md() -> str:
         candidate = p / "CLAUDE.md"
         if candidate.exists():
             try:
-                content_parts.append(f"[Project CLAUDE.md: {candidate}]\n{candidate.read_text()}")
+                text = candidate.read_text()
+                threat = _scan_for_threats(text, f"Project CLAUDE.md ({candidate})")
+                if threat:
+                    warnings.append(threat)
+                else:
+                    content_parts.append(f"[Project CLAUDE.md: {candidate}]\n{text}")
             except Exception:
                 pass
             break
@@ -150,6 +190,12 @@ def get_claude_md() -> str:
         if parent == p:
             break
         p = parent
+
+    # Print warnings to stderr so user sees them
+    if warnings:
+        import sys
+        for w in warnings:
+            print(f"\033[33m{w}\033[0m", file=sys.stderr)
 
     if not content_parts:
         return ""

@@ -1,10 +1,12 @@
 """Tool plugin registry for cheetahclaws.
 
 Provides a central registry for tool definitions, lookup, schema export,
-and dispatch with output truncation.
+dispatch with output truncation, and result caching for read-only tools.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
@@ -30,6 +32,24 @@ class ToolDef:
 # --------------- internal state ---------------
 
 _registry: Dict[str, ToolDef] = {}
+
+# --------------- result cache (read-only tools only) ---------------
+
+_CACHE_MAX = 64  # max cached entries
+_cache: Dict[str, str] = {}   # hash → result
+_cache_order: list[str] = []  # LRU eviction order
+
+
+def _cache_key(name: str, params: Dict[str, Any]) -> str:
+    """Create a stable hash from tool name + params."""
+    raw = json.dumps({"n": name, "p": params}, sort_keys=True, default=str)
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+def clear_tool_cache() -> None:
+    """Clear the tool result cache. Called on file writes to invalidate."""
+    _cache.clear()
+    _cache_order.clear()
 
 
 # --------------- public API ---------------
@@ -75,10 +95,30 @@ def execute_tool(
     if tool is None:
         return f"Error: tool '{name}' not found."
 
+    # Cache hit for read-only tools (same name + same params = same result)
+    use_cache = tool.read_only
+    if use_cache:
+        key = _cache_key(name, params)
+        if key in _cache:
+            return _cache[key]
+    else:
+        # Write tools invalidate cache (file content may have changed)
+        if name in ("Write", "Edit", "Bash", "NotebookEdit"):
+            clear_tool_cache()
+
     try:
         result = tool.func(params, config)
     except Exception as e:
         return f"Error executing {name}: {e}"
+
+    # Store in cache for read-only tools
+    if use_cache:
+        _cache[key] = result
+        _cache_order.append(key)
+        # Evict oldest if over limit
+        while len(_cache_order) > _CACHE_MAX:
+            old = _cache_order.pop(0)
+            _cache.pop(old, None)
 
     if len(result) > max_output:
         first_half = max_output // 2

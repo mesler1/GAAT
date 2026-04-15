@@ -169,17 +169,13 @@ def compact_messages(messages: list, config: dict, focus: str = "") -> list:
         summary_prompt += f"\n\nFocus especially on: {focus}"
     summary_prompt += "\n\n" + old_text
 
-    # Call LLM for summary
-    summary_text = ""
-    for event in providers.stream(
-        model=config["model"],
+    # Call auxiliary (fast/cheap) model for summary instead of the primary model
+    from auxiliary import stream_auxiliary
+    summary_text = stream_auxiliary(
         system="You are a concise summarizer.",
         messages=[{"role": "user", "content": summary_prompt}],
-        tool_schemas=[],
         config=config,
-    ):
-        if isinstance(event, providers.TextChunk):
-            summary_text += event.text
+    )
 
     summary_msg = {
         "role": "user",
