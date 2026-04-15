@@ -91,74 +91,62 @@ def _run_analysis(symbol: str, state, config: dict) -> bool:
 def _build_analysis_prompt(
     symbol: str, trade_date: str, reports: dict[str, str]
 ) -> str:
-    """Build the comprehensive multi-agent analysis prompt."""
-    from .agents import researcher, risk_manager, portfolio_manager
+    """Build the multi-agent analysis prompt.
 
-    return f"""You are now operating as the CheetahClaws Trading Agent system. Execute the following multi-agent analysis pipeline for **{symbol}** on **{trade_date}**.
+    Designed to be concise enough for small models (gpt-5-nano) while
+    still producing structured output across all 5 phases.
+    """
+    # Check if we have real data or just errors
+    has_data = any(
+        "Error" not in reports.get(k, "Error")
+        for k in ("technical", "fundamental", "news")
+    )
 
-## Available Market Data
+    if has_data:
+        data_section = f"""## Market Data for {symbol} (Date: {trade_date})
 
-### Technical Analysis Report
-{reports.get('technical', 'Not available')}
+### Technical
+{reports.get('technical', 'N/A')}
 
-### Fundamental Analysis Report
-{reports.get('fundamental', 'Not available')}
+### Fundamentals
+{reports.get('fundamental', 'N/A')}
 
-### News Report
-{reports.get('news', 'Not available')}
+### News
+{reports.get('news', 'N/A')}"""
+    else:
+        data_section = f"""## Note: Market data unavailable (yfinance not installed)
+Use your general knowledge about {symbol} as of {trade_date}. State clearly when using general knowledge vs. data."""
 
----
+    return f"""Analyze {symbol} using the 5-phase trading pipeline below. Write each phase ONCE, then move to the next. Do NOT repeat any phase.
 
-## Execute This Pipeline (respond with ALL phases):
-
-### Phase 1: Bull Researcher
-Build a compelling BULLISH case for {symbol}:
-- Growth catalysts and competitive advantages
-- Bullish technical signals
-- Strong fundamentals
-- Positive sentiment/news catalysts
-End with: **BULL VERDICT**: [Strong Buy / Buy / Lean Buy] — [thesis]
-
-### Phase 2: Bear Researcher
-Build a compelling BEARISH case for {symbol}:
-- Risk factors and vulnerabilities
-- Bearish technical signals
-- Fundamental concerns
-- Negative catalysts
-End with: **BEAR VERDICT**: [Strong Sell / Sell / Lean Sell] — [thesis]
-
-### Phase 3: Research Judge
-Evaluate both cases objectively:
-- Which side has stronger evidence?
-- Make a DECISIVE call: BUY / SELL / HOLD
-- Include: confidence level, position size %, stop loss, take profit
-
-### Phase 4: Risk Management Panel
-Three perspectives on the research judge's recommendation:
-
-**Aggressive Analyst**: Argue for maximum position, cite upside potential
-**Conservative Analyst**: Argue for risk protection, cite downside scenarios
-**Neutral Analyst**: Balanced view with optimal position sizing
-
-### Phase 5: Portfolio Manager Final Decision
-
-**RATING**: [exactly one of: BUY / OVERWEIGHT / HOLD / UNDERWEIGHT / SELL]
-
-**Executive Summary**: 2-3 sentence investment thesis
-
-**Action Plan**:
-- Entry Strategy
-- Position Size (% of portfolio)
-- Time Horizon
-- Stop Loss
-- Take Profit
-
-**Key Risks to Monitor** (top 3)
-
-**Conviction Level**: High / Medium / Low
+{data_section}
 
 ---
-Respond with ALL five phases in order. Be specific and cite data from the reports.
+
+## Phase 1: BULL CASE
+Write 3-4 bullet points arguing FOR buying {symbol} (growth drivers, technical strength, positive catalysts).
+End with: **BULL VERDICT: [Buy/Strong Buy]** — one sentence thesis.
+
+## Phase 2: BEAR CASE
+Write 3-4 bullet points arguing AGAINST buying {symbol} (risks, overvaluation, negative catalysts).
+End with: **BEAR VERDICT: [Sell/Lean Sell]** — one sentence thesis.
+
+## Phase 3: JUDGE DECISION
+Which case is stronger? State: **DECISION: BUY / SELL / HOLD** with confidence (High/Medium/Low) and suggested position size (% of portfolio).
+
+## Phase 4: RISK PANEL
+- **Aggressive**: one sentence arguing for larger position
+- **Conservative**: one sentence arguing for smaller position with tighter stops
+- **Neutral**: one sentence with balanced recommendation
+
+## Phase 5: FINAL RATING
+**RATING: [BUY / OVERWEIGHT / HOLD / UNDERWEIGHT / SELL]**
+**Summary**: 2 sentences on investment thesis.
+**Plan**: Entry, Position Size %, Stop Loss %, Take Profit %, Time Horizon.
+**Top 3 Risks**: numbered list.
+**Conviction**: High / Medium / Low
+
+IMPORTANT: Write each phase exactly once. Do not loop back to Phase 1 after starting Phase 2.
 """
 
 

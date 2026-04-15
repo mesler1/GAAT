@@ -711,11 +711,17 @@ def repl(config: dict, initial_prompt: str = None):
     query_lock = threading.RLock()
 
     # Apply rich_live config: disable in-place Live streaming if terminal has issues.
-    # Auto-detect SSH sessions and dumb terminals where ANSI cursor-up doesn't work.
-    import os as _os
+    # Auto-detect environments where ANSI cursor-up / live-rewrite doesn't work:
+    #   - SSH sessions (cursor-up fails across network PTY)
+    #   - Dumb terminals (no ANSI support)
+    #   - macOS Terminal.app (can't erase above scroll boundary → duplicated output)
+    #   - Screen/tmux over SSH
+    import os as _os, platform as _plat
     _in_ssh = bool(_os.environ.get("SSH_CLIENT") or _os.environ.get("SSH_TTY"))
     _is_dumb = (console is not None and getattr(console, "is_dumb_terminal", False))
-    _rich_live_default = not _in_ssh and not _is_dumb
+    _is_macos_terminal = (_plat.system() == "Darwin"
+                          and _os.environ.get("TERM_PROGRAM", "") in ("Apple_Terminal", ""))
+    _rich_live_default = not _in_ssh and not _is_dumb and not _is_macos_terminal
     set_rich_live(config.get("rich_live", _rich_live_default))
 
     # Initialize proactive polling state via RuntimeContext (defaults already set)

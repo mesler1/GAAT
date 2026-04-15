@@ -101,14 +101,39 @@ def _start_live() -> None:
                              vertical_overflow="visible")
         _current_live.start()
 
+_LIVE_LINE_LIMIT = 80  # auto-switch to plain streaming beyond this many lines
+
+
 def stream_text(chunk: str) -> None:
-    """Buffer chunk; update Live in-place when Rich available, else print directly."""
+    """Buffer chunk; update Live in-place when Rich available, else print directly.
+
+    Safety: if accumulated text exceeds _LIVE_LINE_LIMIT lines, auto-switch
+    from Rich Live to plain streaming to prevent terminal re-render duplication
+    on terminals that can't handle large Live areas (macOS Terminal, etc.).
+    """
     global _current_live
     _accumulated_text.append(chunk)
+
     if _RICH and _RICH_LIVE:
-        if _current_live is None:
-            _start_live()
-        _current_live.update(_make_renderable("".join(_accumulated_text)), refresh=True)
+        full = "".join(_accumulated_text)
+        line_count = full.count("\n")
+
+        # Safety: too many lines → kill Live and fall back to plain streaming
+        if _current_live is not None and line_count > _LIVE_LINE_LIMIT:
+            _current_live.stop()
+            _current_live = None
+            # Print the full text once (Live already displayed partial content,
+            # but stopping Live clears it — so we re-print cleanly)
+            console.print(_make_renderable(full))
+            return
+
+        if line_count <= _LIVE_LINE_LIMIT:
+            if _current_live is None:
+                _start_live()
+            _current_live.update(_make_renderable(full), refresh=True)
+        else:
+            # Already past limit, no Live — just append new chunk
+            print(chunk, end="", flush=True)
     else:
         print(chunk, end="", flush=True)
 
