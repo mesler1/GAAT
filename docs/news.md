@@ -2,6 +2,14 @@
  
 ## 🔥🔥🔥 News (Pacific Time)
 
+
+
+- Apr 14, 2026 (**v3.05.67**): **Packaging fix, `/config` safety, and readline completion fix**
+  - **Fix `ModuleNotFoundError` on `pip install` / `uv tool install`** (`pyproject.toml`) — 16 missing top-level modules (`logging_utils`, `agent_runner`, `tools_fs`, `tools_shell`, etc.) and the `monitor` package were not declared in `pyproject.toml`, causing `No module named 'logging_utils'` and similar crashes after installation (#36). All runtime modules are now correctly packaged.
+  - **`/config` no longer exposes secrets** (`commands/config_cmd.py`) — the `/config` display now filters out sensitive keys (`api_key`, `telegram_token`, `wechat_token`, and any key ending in `_key`, `_token`, or `_secret`) as well as internal runtime keys (prefixed with `_`). Previously, `/config` crashed with `TypeError` on non-serializable `threading.Thread` objects and leaked credentials.
+  - **Readline completion condition fix** (`cheetahclaws.py`) — changed `"/" in line` to `line.startswith("/")` in the completer and display hook, preventing false matches on non-slash input containing `/`. Completion menu now redisplays the prompt line correctly after showing matches.
+  - **Version bumped to 3.05.67.**
+
 - Apr 12, 2026 (**v3.05.66**): **Auto max_tokens cap per model + tool robustness fixes**
   - **Automatic `max_tokens` capping** (`providers.py`) — a new `resolve_max_tokens()` function automatically caps `max_tokens` to the model's actual limit before every API call, eliminating `BadRequestError: max_tokens cannot be greater than max_model_len` errors when using vLLM or other bounded local endpoints. Priority: (1) per-model hard limit from a built-in table of 30+ known models; (2) for `custom` provider, `GET /v1/models` is queried at first call and the `max_model_len` field is used (result cached per base URL); (3) provider-level `context_limit // 2` as a conservative fallback. The user's configured value is always treated as an upper bound — never increased.
   - **`KeyError: 'file_path'` in agent tool calls** (`tools.py`) — when a model (e.g. Qwen) generates a malformed tool call omitting the required `file_path` parameter for `Read` / `Write` / `Edit`, the agent runner now returns a descriptive error string (`"Error: missing required parameter 'file_path'"`) instead of crashing with an unhandled `KeyError`. The agent can then self-correct on the next iteration.
