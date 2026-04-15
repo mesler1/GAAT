@@ -133,10 +133,16 @@ else
     PIP_BIN="$($PYTHON -m site --user-base 2>/dev/null)/bin"
     if [ -f "$PIP_BIN/cheetahclaws" ]; then
         SHELL_RC=""
-        if [ -f "$HOME/.zshrc" ]; then
+        CURRENT_SH="$(basename "${SHELL:-bash}")"
+        if [ "$CURRENT_SH" = "zsh" ]; then
             SHELL_RC="$HOME/.zshrc"
+            touch "$SHELL_RC"  # ensure it exists on macOS
+        elif [ "$CURRENT_SH" = "fish" ]; then
+            SHELL_RC="$HOME/.config/fish/config.fish"
         elif [ -f "$HOME/.bashrc" ]; then
             SHELL_RC="$HOME/.bashrc"
+        elif [ -f "$HOME/.bash_profile" ]; then
+            SHELL_RC="$HOME/.bash_profile"
         fi
 
         if [ -n "$SHELL_RC" ]; then
@@ -161,9 +167,19 @@ echo -e "${GREEN}  │  Installation complete!                   │${RESET}"
 echo -e "${GREEN}  │  ${VERSION}                               ${RESET}"
 echo -e "${GREEN}  ╰──────────────────────────────────────────╯${RESET}"
 echo ""
+# Detect the user's shell for the reload hint
+CURRENT_SHELL="$(basename "${SHELL:-bash}")"
+if [ "$CURRENT_SHELL" = "zsh" ]; then
+    RELOAD_CMD="source ~/.zshrc"
+elif [ "$CURRENT_SHELL" = "fish" ]; then
+    RELOAD_CMD="source ~/.config/fish/config.fish"
+else
+    RELOAD_CMD="source ~/.bashrc"
+fi
+
 echo -e "  ${DIM}Reload your shell, then start:${RESET}"
 echo ""
-echo -e "    source ~/.bashrc    ${DIM}# or: source ~/.zshrc${RESET}"
+echo -e "    ${RELOAD_CMD}"
 echo -e "    cheetahclaws        ${DIM}# start the REPL${RESET}"
 echo ""
 echo -e "  ${DIM}First run will guide you through setup (API key, model).${RESET}"
