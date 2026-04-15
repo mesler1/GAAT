@@ -73,32 +73,19 @@ def _run_analysis(symbol: str, state, config: dict) -> bool:
 
     trade_date = datetime.now().strftime("%Y-%m-%d")
 
-    # Phase 2-5: Generate the full multi-agent prompt
-    # This will be processed by the LLM in the agent loop
-    info(clr("\nPhase 2-5: Multi-agent analysis...", "cyan"))
-    info("  Generating analysis prompts for LLM processing...\n")
+    # Phase 2-5: Build the full multi-agent prompt and return it
+    # so the REPL sends it to the AI for processing
+    info(clr("\nPhase 2-5: Sending to AI for multi-agent analysis...", "cyan"))
+    info(clr("  1. Bull vs Bear research debate", "dim"))
+    info(clr("  2. Research judge recommendation", "dim"))
+    info(clr("  3. Risk management panel (aggressive/conservative/neutral)", "dim"))
+    info(clr("  4. Portfolio manager final decision", "dim"))
+    info("")
 
-    # Build the full analysis prompt
     full_prompt = _build_analysis_prompt(symbol, trade_date, reports)
 
-    # Inject the prompt into the conversation for the LLM to process
-    if hasattr(state, 'messages'):
-        state.messages.append({
-            "role": "user",
-            "content": full_prompt,
-        })
-        info(clr("Multi-agent analysis prompt injected. The AI will now process:", "dim"))
-        info(clr("  1. Bull vs Bear research debate", "dim"))
-        info(clr("  2. Research judge recommendation", "dim"))
-        info(clr("  3. Risk management panel (aggressive/conservative/neutral)", "dim"))
-        info(clr("  4. Portfolio manager final decision", "dim"))
-        info("")
-    else:
-        # Fallback: print the reports directly
-        for name, report in reports.items():
-            info(f"\n{report}")
-
-    return True
+    # Return as __ssj_query__ so the REPL sends this to the AI
+    return ("__ssj_query__", full_prompt)
 
 
 def _build_analysis_prompt(
