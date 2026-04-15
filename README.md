@@ -106,6 +106,16 @@ Other install methods: [pip install](#alternative-install-with-pip) | [uv instal
 
 ---
 
+ <div align=center>
+ <img src="https://github.com/SafeRL-Lab/cheetahclaws/blob/main/docs/trading_demo.gif" width="850"/> 
+ </div>
+<div align=center>
+<center style="color:#000000;text-decoration:underline">Autonomous Trading Agent</center>
+ </div>
+
+---
+
+
 
  
 ## 🔥🔥🔥 News (Pacific Time)
