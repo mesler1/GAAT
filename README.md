@@ -91,6 +91,12 @@ English | [中文](https://github.com/SafeRL-Lab/clawspring/blob/main/docs/READM
 ## 🔥🔥🔥 News (Pacific Time)
 
  
+- Apr 14, 2026 (**v3.05.69**): **Actionable error messages, dependency sync, and contributor guide**
+  - **Actionable API error messages** (`cheetahclaws.py`) — the REPL error handler now detects 6 common failure modes (invalid API key, network timeout, Ollama not running, rate limit, model not found, insufficient credits) and prints a specific hint alongside the error instead of a generic message. The proactive watcher background thread no longer dumps raw Python tracebacks to stdout — errors are routed through `logging_utils` instead.
+  - **Dependency sync** (`pyproject.toml`, `requirements.txt`) — `pyte>=0.8.0` added to `pyproject.toml` core dependencies (was only in `requirements.txt`, causing import failures after `pip install .`). `requirements.txt` rewritten to mirror `pyproject.toml` as single source of truth, with optional deps (`sounddevice`, `Pillow`) clearly marked.
+  - **`CONTRIBUTING.md`** — new contributor guide covering project structure, architecture (config vs RuntimeContext, tool/plugin/hooks systems), development conventions, and a PR checklist. Addresses recurring PR issues where contributors misunderstood the plugin loader (`TOOL_DEFS` vs `register_tool()`), hooks system (no event-based hooks), and runtime state management.
+  - **Version bumped to 3.05.69.**
+
 - Apr 14, 2026 (**v3.05.68**): **CI/CD, config/runtime separation, and module reorganization**
   - **GitHub Actions CI** (`.github/workflows/ci.yml`) — added automated testing on every push and PR: `pytest` across Python 3.10–3.13, plus a package smoke test that installs via `pip install .` and verifies all modules are importable. No more silent packaging regressions.
   - **Config/runtime separation** (`runtime.py`) — runtime state (`_proactive_thread`, `_pending_image`, `_plan_file`, bridge turn flags, etc.) moved out of the `config` dict into `RuntimeContext` fields. The `config` dict now holds only serializable user configuration. Added `runtime.get_ctx(config)` helper for easy access. Migrated 18 files; 327 tests pass.

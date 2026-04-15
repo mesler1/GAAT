@@ -260,8 +260,8 @@ def _proactive_watcher_loop(config):
                        "continue and complete that work now. "
                        "Otherwise, check if you have any pending tasks to execute or simply say 'No pending tasks'.")
         except Exception as e:
-            traceback.print_exc()
-            print(f"\n[proactive watcher error]: {e}", flush=True)
+            import logging_utils as _log
+            _log.error("proactive_watcher_error", error=str(e)[:200])
 
 
 # ── Slash commands ─────────────────────────────────────────────────────────
@@ -793,8 +793,25 @@ def repl(config: dict, initial_prompt: str = None):
                                 state.messages.pop()
                             return run_query(user_input, is_background)
                         return
-                # Any other uncaught error — never crash, just report and let user retry
-                err(f"Error: {type(e).__name__}: {_truncate_err_global(str(e))}")
+                # ── Actionable error messages for common API failures ─────
+                err_str = str(e).lower()
+                err_cls = type(e).__name__
+                hint = ""
+                if "auth" in err_cls.lower() or "authentication" in err_str or "invalid.*api.key" in err_str or "401" in err_str:
+                    hint = "Check your API key: /config or set the appropriate env var (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.)"
+                elif isinstance(e, (ConnectionError, OSError)) or "connection" in err_str or isinstance(e, urllib.error.URLError):
+                    hint = "Network error — check your internet connection or the API endpoint URL."
+                    if "ollama" in err_str or "localhost" in err_str or "11434" in err_str:
+                        hint = "Cannot connect to Ollama. Is it running? Start with: ollama serve"
+                elif "rate_limit" in err_str or "rate limit" in err_str or err_cls == "RateLimitError":
+                    hint = "Rate limited by the API. Wait a moment and retry."
+                elif "not_found" in err_str or "model" in err_str and "not found" in err_str or "does not exist" in err_str:
+                    hint = f"Model '{config.get('model', '?')}' not found. Check available models with /model"
+                elif "insufficient" in err_str and ("quota" in err_str or "balance" in err_str or "credit" in err_str):
+                    hint = "Insufficient API credits. Check your billing at your provider's dashboard."
+                err(f"Error: {err_cls}: {_truncate_err_global(str(e))}")
+                if hint:
+                    warn(f"Hint: {hint}")
                 warn("Your conversation is intact. You can retry or type a new message.")
 
             _stop_tool_spinner()

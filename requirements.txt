@@ -1,18 +1,18 @@
+# Core dependencies (must match pyproject.toml [project.dependencies])
 anthropic>=0.40.0
 openai>=1.30.0
 httpx>=0.27.0
 rich>=13.0.0
-pyte>=0.8.0            # terminal emulator for !claude / !python bridge rendering
+pyte>=0.8.0
 
-sounddevice
+# ── Optional dependencies ────────────────────────────────────────────────
+# Voice input:  pip install cheetahclaws[voice]
+#   sounddevice
 
-# ── Voice input (optional — install whichever STT backend you prefer) ──────
-# Recording backend (choose one):
-#   pip install sounddevice        # cross-platform mic capture (recommended)
-#   sudo apt install alsa-utils    # Linux arecord fallback
-#   sudo apt install sox / brew install sox  # SoX rec fallback
-#
-# STT backend (choose one):
+# Vision input: pip install cheetahclaws[vision]
+#   Pillow
+
+# ── Voice STT backends (choose one) ─────────────────────────────────────
 #   pip install faster-whisper     # local Whisper, fastest  (recommended)
 #   pip install openai-whisper     # local Whisper, original
 #   # or set OPENAI_API_KEY to use the OpenAI Whisper cloud API
