@@ -83,7 +83,10 @@ def _interactive_ollama_picker(config: dict) -> bool:
 def cmd_config(args: str, _state, config) -> bool:
     from config import save_config
     if not args:
-        display = {k: v for k, v in config.items() if k != "api_key" and not k.startswith("_")}
+        _SECRETS = {"api_key", "anthropic_api_key", "telegram_token", "wechat_token"}
+        display = {k: v for k, v in config.items()
+                   if k not in _SECRETS and not k.startswith("_")
+                   and not k.endswith(("_key", "_token", "_secret"))}
         print(json.dumps(display, indent=2))
     elif "=" in args:
         key, _, val = args.partition("=")

@@ -451,7 +451,11 @@ _CMD_META: dict[str, tuple[str, list[str]]] = {
 }
 
 
+_rl_current_prompt = ""   # set by _read_input before each input() call
+
+
 def setup_readline(history_file: Path):
+    global _rl_current_prompt
     if readline is None:
         return
     try:
@@ -473,8 +477,8 @@ def setup_readline(history_file: Path):
     def completer(text: str, state: int):
         line = readline.get_line_buffer()
 
-        # ── Completing a command name: line has "/" but no space yet ──────────
-        if "/" in line and " " not in line:
+        # ── Completing a command name: line starts with "/" and no space yet ──
+        if line.startswith("/") and " " not in line:
             matches = sorted(f"/{c}" for c in _CMD_META if f"/{c}".startswith(text))
             return matches[state] if state < len(matches) else None
 
@@ -492,7 +496,7 @@ def setup_readline(history_file: Path):
         """Custom display: show command descriptions alongside each match."""
         sys.stdout.write("\n")
         line = readline.get_line_buffer()
-        is_cmd = "/" in line and " " not in line
+        is_cmd = line.startswith("/") and " " not in line
 
         if is_cmd:
             col_w = max(len(m) for m in matches) + 2
@@ -506,6 +510,8 @@ def setup_readline(history_file: Path):
         else:
             for m in sorted(matches):
                 sys.stdout.write(f"  {m}\n")
+        # Redisplay prompt + current buffer so typing continues on the prompt line
+        sys.stdout.write(_rl_current_prompt + readline.get_line_buffer())
         sys.stdout.flush()
 
     readline.set_completion_display_matches_hook(display_matches)
@@ -923,11 +929,13 @@ def repl(config: dict, initial_prompt: str = None):
 
     def _read_input(prompt: str) -> str:
         """Read one user turn, collecting multi-line pastes as a single string."""
+        global _rl_current_prompt
         import select as _sel
 
         # ── Phase 1: get first line via readline (history, line-edit intact) ──
         # Wrap ANSI codes so readline counts them as zero-width (#29/#31).
         rl_prompt = re.sub(r'(\x1b\[[0-9;]*m)', r'\001\1\002', prompt)
+        _rl_current_prompt = prompt   # for display_matches to redisplay
         first = input(rl_prompt)
 
         # ── Phase 2: bracketed paste? ─────────────────────────────────────────
