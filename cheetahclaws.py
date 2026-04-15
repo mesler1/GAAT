@@ -130,6 +130,9 @@ from ui.render import (
     _RICH, console,
 )
 
+# ── Input layer (prompt_toolkit with readline fallback) ──────────────────
+from ui.input import read_line as _pt_read_line, HAS_PROMPT_TOOLKIT
+
 # ── Bridge commands ────────────────────────────────────────────────────────
 import bridges.telegram as _btg
 import bridges.wechat   as _bwx
@@ -489,10 +492,6 @@ def setup_readline(history_file: Path):
             pass
     atexit.register(_save_history)
 
-    # Allow "/" to be part of a completion token so "/model" is one word
-    delims = readline.get_completer_delims().replace("/", "")
-    readline.set_completer_delims(delims)
-
     def completer(text: str, state: int):
         line = readline.get_line_buffer()
 
@@ -520,12 +519,11 @@ def setup_readline(history_file: Path):
         if is_cmd:
             col_w = max(len(m) for m in matches) + 2
             for m in sorted(matches):
-                cmd = m[1:]
-                desc = _CMD_META.get(cmd, ("", []))[0]
-                subs = _CMD_META.get(cmd, ("", []))[1]
+                desc = _CMD_META.get(m, ("", []))[0]
+                subs = _CMD_META.get(m, ("", []))[1]
                 sub_hint = ("  [" + ", ".join(subs[:4])
                             + ("…" if len(subs) > 4 else "") + "]") if subs else ""
-                sys.stdout.write(f"  \033[36m{m:<{col_w}}\033[0m  {desc}{sub_hint}\n")
+                sys.stdout.write(f"  \033[36m/{m:<{col_w}}\033[0m  {desc}{sub_hint}\n")
         else:
             for m in sorted(matches):
                 sys.stdout.write(f"  {m}\n")
@@ -545,7 +543,8 @@ def repl(config: dict, initial_prompt: str = None):
     from context import build_system_prompt
     from agent import AgentState, run, TextChunk, ThinkingChunk, ToolStart, ToolEnd, TurnDone, PermissionRequest
 
-    setup_readline(HISTORY_FILE)
+    if not HAS_PROMPT_TOOLKIT:
+        setup_readline(HISTORY_FILE)
     state = AgentState()
     verbose = config.get("verbose", False)
 
@@ -967,7 +966,22 @@ def repl(config: dict, initial_prompt: str = None):
         global _rl_current_prompt
         import select as _sel
 
-        # ── Phase 1: get first line via readline (history, line-edit intact) ──
+        # ── Phase 1a: prompt_toolkit (TTY + library available + not opted out) ─
+        # Handles bracketed paste natively, so phase-2/3 are skipped on success.
+        if (
+            HAS_PROMPT_TOOLKIT
+            and sys.stdin.isatty()
+            and os.environ.get("CHEETAH_PT_INPUT", "1") != "0"
+        ):
+            try:
+                return _pt_read_line(prompt, HISTORY_FILE)
+            except (EOFError, KeyboardInterrupt):
+                raise
+            except Exception as _pt_err:
+                warn(f"prompt_toolkit failed ({_pt_err}); falling back to readline")
+                # fall through to phase 1b
+
+        # ── Phase 1b: get first line via readline (history, line-edit intact) ──
         # Wrap ANSI codes so readline counts them as zero-width (#29/#31).
         rl_prompt = re.sub(r'(\x1b\[[0-9;]*m)', r'\001\1\002', prompt)
         _rl_current_prompt = prompt   # for display_matches to redisplay
