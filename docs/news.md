@@ -8,6 +8,7 @@
   - **Fix `ModuleNotFoundError` on `pip install` / `uv tool install`** (`pyproject.toml`) — 16 missing top-level modules (`logging_utils`, `agent_runner`, `tools_fs`, `tools_shell`, etc.) and the `monitor` package were not declared in `pyproject.toml`, causing `No module named 'logging_utils'` and similar crashes after installation (#36). All runtime modules are now correctly packaged.
   - **`/config` no longer exposes secrets** (`commands/config_cmd.py`) — the `/config` display now filters out sensitive keys (`api_key`, `telegram_token`, `wechat_token`, and any key ending in `_key`, `_token`, or `_secret`) as well as internal runtime keys (prefixed with `_`). Previously, `/config` crashed with `TypeError` on non-serializable `threading.Thread` objects and leaked credentials.
   - **Readline completion condition fix** (`cheetahclaws.py`) — changed `"/" in line` to `line.startswith("/")` in the completer and display hook, preventing false matches on non-slash input containing `/`. Completion menu now redisplays the prompt line correctly after showing matches.
+  - **Packaging fix, `/config` safety, and readline completion fix** — Fixed `ModuleNotFoundError` on install (#36), secrets filtering in `/config`, readline completion.
   - **Version bumped to 3.05.67.**
 
 - Apr 12, 2026 (**v3.05.66**): **Auto max_tokens cap per model + tool robustness fixes**
