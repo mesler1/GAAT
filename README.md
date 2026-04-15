@@ -13,8 +13,10 @@ English | [中文](https://github.com/SafeRL-Lab/clawspring/blob/main/docs/READM
     <a href="https://github.com/chauncygu/collection-claude-code-source-code">The newest source of Claude Code</a>
     ·
     <a href="https://github.com/SafeRL-Lab/clawspring/issues">Issue</a>
-  ·
-    <a href="https://deepwiki.com/SafeRL-Lab/clawspring">Brief Intro</a>
+    ·
+    <a href="https://cheetahclaws.github.io/">Website</a>
+    ·
+    <a href="https://deepwiki.com/SafeRL-Lab/cheetahclaws">Brief Intro</a>
   
   </p>
 </div>
