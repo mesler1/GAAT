@@ -83,7 +83,7 @@ def _interactive_ollama_picker(config: dict) -> bool:
 def cmd_config(args: str, _state, config) -> bool:
     from config import save_config
     if not args:
-        display = {k: v for k, v in config.items() if k != "api_key"}
+        display = {k: v for k, v in config.items() if k != "api_key" and not k.startswith("_")}
         print(json.dumps(display, indent=2))
     elif "=" in args:
         key, _, val = args.partition("=")
