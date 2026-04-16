@@ -1443,6 +1443,14 @@ def main():
                         help="Enable extended thinking")
     parser.add_argument("--version", action="store_true", help="Print version")
     parser.add_argument("--setup", action="store_true", help="Run interactive setup wizard")
+    parser.add_argument("--web", action="store_true",
+                        help="Start web terminal (browser-based access)")
+    parser.add_argument("--port", type=int, default=8080,
+                        help="Port for web terminal (default: 8080)")
+    parser.add_argument("--host", default="127.0.0.1",
+                        help="Host for web terminal (default: 127.0.0.1, use 0.0.0.0 for network)")
+    parser.add_argument("--no-auth", action="store_true",
+                        help="Disable web terminal password (local use only)")
     parser.add_argument("-h", "--help", action="store_true", help="Show help")
 
     args = parser.parse_args()
@@ -1453,6 +1461,11 @@ def main():
 
     if args.help:
         print(__doc__)
+        sys.exit(0)
+
+    if args.web:
+        from web.server import start_web_server
+        start_web_server(port=args.port, host=args.host, no_auth=args.no_auth)
         sys.exit(0)
 
     from cc_config import load_config, save_config, has_api_key

@@ -1,0 +1,1538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>CheetahClaws Chat</title>
+<style>
+/* ── Dark theme (default) ─────────────────────────────────────── */
+:root, [data-theme="dark"] {
+  --bg: #0b0b0e; --surface: #111116; --panel: #18181f; --panel2: #1e1e28;
+  --border: #252530; --border-dim: #1c1c24;
+  --text: #dcdce8; --text-dim: #9494ae; --text-muted: #6e6e88;
+  --accent: #e8a045; --accent-dim: rgba(232,160,69,0.1);
+  --green: #4ade80; --green-dim: rgba(74,222,128,0.1);
+  --red: #f87171; --red-dim: rgba(248,113,113,0.1);
+  --blue: #60a5fa; --blue-dim: rgba(96,165,250,0.1);
+  --yellow: #fbbf24; --purple: #c084fc;
+  --radius: 10px; --radius-sm: 6px;
+  --mono: 'JetBrains Mono','Fira Code','Cascadia Code',monospace;
+  --font: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --sidebar-w: 260px;
+  --code-bg: #18181f; --shadow: rgba(0,0,0,0.3);
+}
+/* ── Light theme ─────────────────────────────────────────────── */
+[data-theme="light"] {
+  --bg: #f5f5f7; --surface: #ffffff; --panel: #f0f0f3; --panel2: #e8e8ed;
+  --border: #d4d4dc; --border-dim: #e0e0e6;
+  --text: #1a1a2e; --text-dim: #555570; --text-muted: #8888a0;
+  --accent: #d08020; --accent-dim: rgba(208,128,32,0.08);
+  --green: #22a55a; --green-dim: rgba(34,165,90,0.08);
+  --red: #dc3545; --red-dim: rgba(220,53,69,0.06);
+  --blue: #2563eb; --blue-dim: rgba(37,99,235,0.06);
+  --yellow: #ca8a04; --purple: #7c3aed;
+  --code-bg: #f0f0f3; --shadow: rgba(0,0,0,0.08);
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:var(--font);
+       height:100vh; display:flex; overflow:hidden; font-size:14px;
+       transition:background .3s ease, color .3s ease; }
+#sidebar, #main, #topbar, #input-area, #settings-panel, .tool-card, .approval-card,
+.activity-indicator, .msg .bubble, #prompt-input, #send-btn,
+.sp-select, .sp-input, .sp-toggle, .sess-item {
+  transition:background .3s ease, color .3s ease, border-color .3s ease;
+}
+
+/* ── Sidebar ──────────────────────────────────────────────────── */
+#sidebar {
+  width:var(--sidebar-w); min-width:var(--sidebar-w); background:var(--surface);
+  border-right:1px solid var(--border); display:flex; flex-direction:column;
+  transition:transform .25s ease;
+}
+#sidebar .hdr {
+  padding:16px; border-bottom:1px solid var(--border);
+  display:flex; align-items:center; justify-content:space-between;
+}
+#sidebar .hdr h2 { font-size:15px; color:var(--accent); font-weight:700; }
+#sidebar .new-btn {
+  background:var(--accent); color:#000; border:none; padding:5px 12px;
+  border-radius:var(--radius-sm); font-weight:600; font-size:12px; cursor:pointer;
+}
+#sidebar .new-btn:hover { opacity:.85; }
+#session-list { flex:1; overflow-y:auto; padding:8px; }
+.sess-item {
+  padding:10px 12px; border-radius:var(--radius-sm); cursor:pointer;
+  margin-bottom:4px; border:1px solid transparent; transition:background .15s;
+}
+.sess-item:hover { background:var(--panel); }
+.sess-item.active { background:var(--panel); border-color:var(--accent); }
+.sess-item .sess-id { font-family:var(--mono); font-size:11px; color:var(--text-dim); }
+.sess-item .sess-info { font-size:11px; color:var(--text-muted); margin-top:3px; }
+.sess-item .sess-dot { display:inline-block; width:6px; height:6px; border-radius:50%;
+  background:var(--green); margin-right:6px; vertical-align:middle; }
+.sess-item .sess-dot.idle { background:var(--text-muted); }
+
+/* ── Main area ────────────────────────────────────────────────── */
+#main { flex:1; display:flex; flex-direction:column; min-width:0; }
+#topbar {
+  background:var(--surface); border-bottom:1px solid var(--border);
+  padding:10px 20px; display:flex; align-items:center; justify-content:space-between;
+  font-size:13px;
+}
+#topbar .title { color:var(--accent); font-weight:700; font-size:15px; }
+#topbar .status { display:flex; align-items:center; gap:8px; color:var(--text-dim); }
+#topbar .dot { width:8px; height:8px; border-radius:50%; background:var(--green); }
+#topbar .dot.off { background:var(--red); }
+#topbar .dot.busy { background:var(--yellow); animation:pulse 1.5s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+#topbar .menu-btn {
+  display:none; background:none; border:1px solid var(--border); color:var(--text-dim);
+  padding:4px 8px; border-radius:var(--radius-sm); cursor:pointer; font-size:16px;
+}
+
+/* ── Chat messages ────────────────────────────────────────────── */
+#messages {
+  flex:1; overflow-y:auto; padding:20px; display:flex; flex-direction:column;
+  gap:16px; scroll-behavior:smooth;
+}
+.msg { max-width:min(720px,92%); animation:fadeIn .2s ease; }
+@keyframes fadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:none} }
+.msg.user { align-self:flex-end; max-width:min(680px,88%); }
+.msg.user .bubble {
+  background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
+  border-bottom-right-radius:3px; padding:10px 14px; white-space:pre-wrap;
+}
+.msg.assistant .bubble {
+  padding:4px 0; line-height:1.65;
+}
+.msg .role-tag {
+  font-size:11px; color:var(--text-muted); margin-bottom:4px; font-weight:600;
+  text-transform:uppercase; letter-spacing:.5px;
+}
+
+/* Markdown content */
+.msg.assistant .bubble h1,.msg.assistant .bubble h2,.msg.assistant .bubble h3 {
+  margin:12px 0 6px; color:var(--text);
+}
+.msg.assistant .bubble p { margin:6px 0; }
+.msg.assistant .bubble pre {
+  background:var(--panel); border:1px solid var(--border); border-radius:var(--radius-sm);
+  padding:10px 12px; overflow-x:auto; font-family:var(--mono); font-size:12px;
+  margin:8px 0; line-height:1.5;
+}
+.msg.assistant .bubble code {
+  font-family:var(--mono); font-size:12px; background:var(--panel);
+  padding:1px 5px; border-radius:3px;
+}
+.msg.assistant .bubble pre code { background:none; padding:0; }
+.msg.assistant .bubble ul,.msg.assistant .bubble ol { padding-left:20px; margin:6px 0; }
+.msg.assistant .bubble a { color:var(--blue); }
+.msg.assistant .bubble blockquote {
+  border-left:3px solid var(--border); padding-left:12px; color:var(--text-dim); margin:8px 0;
+}
+
+/* ── Tool card ────────────────────────────────────────────────── */
+.tool-card {
+  max-width:min(640px,90%); border:1px solid var(--border); border-left:3px solid var(--blue);
+  border-radius:var(--radius-sm); margin:8px 0; background:var(--surface);
+  animation:fadeIn .2s ease;
+}
+.tool-card.done { border-left-color:var(--green); }
+.tool-card.denied { border-left-color:var(--red); }
+.tool-card.error { border-left-color:var(--red); }
+.tool-card summary {
+  padding:8px 12px; cursor:pointer; display:flex; align-items:center; gap:8px;
+  font-size:13px; list-style:none; user-select:none;
+}
+.tool-card summary::-webkit-details-marker { display:none; }
+.tool-card .tool-name { font-family:var(--mono); font-weight:600; font-size:12px; }
+.tool-card .tool-badge {
+  font-size:10px; padding:2px 6px; border-radius:3px; font-weight:600;
+  text-transform:uppercase; letter-spacing:.3px;
+}
+.tool-card .tool-badge.running { background:var(--blue-dim); color:var(--blue); }
+.tool-card .tool-badge.done { background:var(--green-dim); color:var(--green); }
+.tool-card .tool-badge.denied { background:var(--red-dim); color:var(--red); }
+.tool-card .tool-body {
+  padding:8px 12px; border-top:1px solid var(--border); font-size:12px;
+}
+.tool-card .tool-body pre {
+  background:var(--panel); padding:8px; border-radius:var(--radius-sm);
+  overflow-x:auto; font-family:var(--mono); font-size:11px; max-height:200px;
+  overflow-y:auto; white-space:pre-wrap; word-break:break-all; margin:4px 0;
+}
+.tool-card .tool-body .label {
+  font-size:10px; color:var(--text-muted); text-transform:uppercase;
+  letter-spacing:.5px; margin-top:6px;
+}
+.tool-card .spinner {
+  width:12px; height:12px; border:2px solid var(--blue-dim);
+  border-top-color:var(--blue); border-radius:50%; animation:spin .7s linear infinite;
+}
+@keyframes spin { to{transform:rotate(360deg)} }
+
+/* ── Approval card ────────────────────────────────────────────── */
+.approval-card {
+  max-width:min(580px,90%); border:1px solid var(--accent); border-radius:var(--radius);
+  background:var(--accent-dim); padding:14px 16px; margin:8px 0; animation:fadeIn .2s ease;
+}
+.approval-card .ap-hdr {
+  display:flex; align-items:center; gap:8px; margin-bottom:8px;
+  font-weight:600; color:var(--accent); font-size:13px;
+}
+.approval-card .ap-desc {
+  font-size:13px; color:var(--text-dim); margin-bottom:12px; white-space:pre-wrap;
+  font-family:var(--mono); line-height:1.5;
+}
+.approval-card .ap-actions { display:flex; gap:8px; }
+.approval-card .ap-btn {
+  padding:6px 16px; border:none; border-radius:var(--radius-sm); font-weight:600;
+  font-size:12px; cursor:pointer; transition:transform .1s;
+}
+.approval-card .ap-btn:hover { transform:scale(1.04); }
+.approval-card .ap-btn.allow { background:var(--green); color:#000; }
+.approval-card .ap-btn.deny { background:var(--red); color:#000; }
+.approval-card.resolved { opacity:.5; pointer-events:none; }
+
+/* ── Activity indicator (visible working state) ──────────────── */
+.activity-indicator {
+  max-width:min(640px,90%); display:flex; align-items:center; gap:10px;
+  padding:12px 16px; margin:8px 0; animation:fadeIn .2s ease;
+  border-radius:var(--radius-sm); background:var(--surface);
+  border:1px solid var(--border);
+}
+.activity-indicator .ai-spinner {
+  width:16px; height:16px; border:2px solid var(--blue-dim);
+  border-top-color:var(--blue); border-radius:50%; animation:spin .7s linear infinite;
+  flex-shrink:0;
+}
+.activity-indicator .ai-text {
+  font-size:13px; color:var(--text-dim); display:flex; align-items:center; gap:6px;
+}
+.activity-indicator .ai-label { color:var(--blue); font-weight:600; }
+.activity-indicator .ai-detail { color:var(--text-muted); font-family:var(--mono); font-size:11px; }
+.activity-indicator .ai-dots::after {
+  content:''; animation:dots 1.4s steps(4,end) infinite;
+}
+@keyframes dots {
+  0% { content:''; } 25% { content:'.'; } 50% { content:'..'; } 75% { content:'...'; }
+}
+.activity-indicator .ai-progress {
+  flex:1; height:3px; background:var(--border); border-radius:2px; overflow:hidden;
+  margin-left:8px; min-width:40px;
+}
+.activity-indicator .ai-progress .ai-fill {
+  height:100%; width:30%; background:var(--blue); border-radius:2px;
+  animation:think 1.2s ease-in-out infinite;
+}
+@keyframes think { 0%{transform:translateX(-100%)} 100%{transform:translateX(400%)} }
+
+/* Thinking-specific style */
+.activity-indicator.thinking { border-color:var(--blue); background:var(--blue-dim); }
+.activity-indicator.thinking .ai-spinner { border-color:rgba(96,165,250,0.3); border-top-color:var(--blue); }
+.activity-indicator.tool-running { border-color:var(--accent); background:var(--accent-dim); }
+.activity-indicator.tool-running .ai-spinner { border-color:rgba(232,160,69,0.3); border-top-color:var(--accent); }
+.activity-indicator.tool-running .ai-label { color:var(--accent); }
+
+/* ── Token usage ──────────────────────────────────────────────── */
+.turn-meta {
+  font-size:11px; color:var(--text-muted); padding:4px 0;
+  font-family:var(--mono);
+}
+
+/* ── Input area ───────────────────────────────────────────────── */
+#input-area {
+  padding:12px 20px 14px; border-top:1px solid var(--border); background:var(--surface);
+}
+#input-row { display:flex; gap:8px; align-items:flex-end; }
+#prompt-input {
+  flex:1; background:var(--panel); border:1px solid var(--border); color:var(--text);
+  border-radius:var(--radius); padding:10px 14px; font-size:14px; font-family:var(--font);
+  resize:none; outline:none; max-height:200px; min-height:42px; line-height:1.5;
+}
+#prompt-input:focus { border-color:var(--accent); }
+#prompt-input::placeholder { color:var(--text-muted); }
+#send-btn {
+  background:var(--accent); color:#000; border:none; padding:10px 18px;
+  border-radius:var(--radius); font-weight:700; font-size:13px; cursor:pointer;
+  white-space:nowrap; min-height:42px; transition:transform .1s;
+}
+#send-btn:hover { transform:scale(1.04); }
+#send-btn:disabled { background:var(--text-muted); cursor:not-allowed; transform:none; }
+#send-btn.stop { background:var(--red); }
+
+/* ── Settings panel ───────────────────────────────────────────── */
+#settings-panel {
+  display:none; position:fixed; top:0; right:0; width:340px; height:100vh;
+  background:var(--surface); border-left:1px solid var(--border); z-index:250;
+  overflow-y:auto; transform:translateX(100%); transition:transform .25s ease;
+  padding:0;
+}
+#settings-panel.open { display:block; transform:translateX(0); }
+#settings-panel .sp-hdr {
+  padding:16px 18px; border-bottom:1px solid var(--border);
+  display:flex; justify-content:space-between; align-items:center;
+}
+#settings-panel .sp-hdr h3 { font-size:15px; color:var(--accent); }
+#settings-panel .sp-close {
+  background:none; border:none; color:var(--text-muted); font-size:20px; cursor:pointer;
+}
+.sp-section { padding:14px 18px; border-bottom:1px solid var(--border-dim); }
+.sp-section h4 {
+  font-size:11px; text-transform:uppercase; letter-spacing:.6px;
+  color:var(--text-muted); margin-bottom:8px;
+}
+.sp-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+.sp-row label { font-size:13px; color:var(--text-dim); }
+.sp-select, .sp-input {
+  background:var(--panel); border:1px solid var(--border); color:var(--text);
+  border-radius:var(--radius-sm); padding:6px 10px; font-size:12px;
+  font-family:var(--mono); outline:none; width:180px;
+}
+.sp-select:focus, .sp-input:focus { border-color:var(--accent); }
+.sp-toggle {
+  position:relative; width:36px; height:20px; background:var(--border);
+  border-radius:10px; cursor:pointer; transition:background .2s;
+}
+.sp-toggle.on { background:var(--green); }
+.sp-toggle::after {
+  content:''; position:absolute; top:2px; left:2px; width:16px; height:16px;
+  background:var(--bg); border-radius:50%; transition:left .2s;
+}
+.sp-toggle.on::after { left:18px; }
+.sp-key-row { display:flex; gap:6px; align-items:center; margin-bottom:6px; }
+.sp-key-row .provider-name {
+  font-size:12px; color:var(--text-dim); width:70px; font-family:var(--mono);
+}
+.sp-key-row .sp-input { flex:1; width:auto; font-size:11px; }
+.sp-key-row .key-dot {
+  width:8px; height:8px; border-radius:50%; flex-shrink:0;
+}
+.sp-key-row .key-dot.ok { background:var(--green); }
+.sp-key-row .key-dot.missing { background:var(--text-muted); }
+.sp-btn {
+  background:var(--accent); color:#000; border:none; padding:6px 14px;
+  border-radius:var(--radius-sm); font-weight:600; font-size:12px;
+  cursor:pointer; margin-top:4px;
+}
+.sp-btn:hover { opacity:.85; }
+.sp-model-group { margin-bottom:8px; }
+.sp-model-group summary {
+  font-size:12px; color:var(--text-dim); cursor:pointer; padding:4px 0;
+  font-family:var(--mono);
+}
+.sp-model-item {
+  padding:4px 12px; font-size:12px; font-family:var(--mono); cursor:pointer;
+  color:var(--text-muted); border-radius:var(--radius-sm);
+}
+.sp-model-item:hover { background:var(--panel); color:var(--text); }
+.sp-model-item.active { color:var(--accent); background:var(--accent-dim); }
+.sp-current { font-size:12px; font-family:var(--mono); color:var(--accent); padding:2px 0; }
+#topbar .settings-btn {
+  background:none; border:1px solid var(--border); color:var(--text-dim);
+  padding:3px 8px; border-radius:var(--radius-sm); cursor:pointer; font-size:13px;
+}
+#topbar .settings-btn:hover { border-color:var(--accent); color:var(--accent); }
+
+/* ── Responsive ───────────────────────────────────────────────── */
+@media (max-width:768px) {
+  #sidebar {
+    position:fixed; top:0; left:0; height:100vh; z-index:200;
+    transform:translateX(-100%);
+  }
+  #sidebar.open { transform:translateX(0); }
+  #topbar .menu-btn { display:block; }
+  .msg { max-width:95%; }
+  .msg.user { max-width:90%; }
+}
+</style>
+</head>
+<body>
+
+<!-- Login overlay (shown when API returns 401) -->
+<div id="login-overlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;
+  background:rgba(0,0,0,0.95);z-index:300;display:none;align-items:center;justify-content:center;
+  font-family:var(--font);">
+  <form onsubmit="app.doLogin(event)" style="background:var(--surface);border:1px solid var(--border);
+    border-radius:12px;padding:2rem;width:320px;text-align:center;">
+    <h2 style="color:var(--accent);margin-bottom:1rem;font-size:1.2rem;">CheetahClaws Chat</h2>
+    <input type="password" id="login-pwd" placeholder="Enter password" autofocus
+      style="width:100%;padding:10px;background:var(--panel);border:1px solid var(--border);
+      border-radius:8px;color:var(--text);font-size:1rem;margin-bottom:1rem;text-align:center;letter-spacing:2px;">
+    <button type="submit" style="background:var(--accent);color:#000;border:none;padding:10px 24px;
+      border-radius:8px;font-weight:700;font-size:0.9rem;cursor:pointer;width:100%;">Connect</button>
+    <div id="login-err" style="color:var(--red);font-size:0.85rem;margin-top:0.5rem;"></div>
+  </form>
+</div>
+
+<!-- Sidebar -->
+<aside id="sidebar">
+  <div class="hdr">
+    <h2>CheetahClaws</h2>
+    <button class="new-btn" onclick="app.newSession()">+ New</button>
+  </div>
+  <div id="session-list"></div>
+</aside>
+
+<!-- Main -->
+<div id="main">
+  <div id="topbar">
+    <button class="menu-btn" onclick="document.getElementById('sidebar').classList.toggle('open')">&#9776;</button>
+    <span class="title">Chat</span>
+    <span class="status">
+      <span class="dot" id="status-dot"></span>
+      <span id="status-text">idle</span>
+      <button class="settings-btn" onclick="app.toggleTheme()" id="theme-btn" title="Toggle theme">&#9790;</button>
+      <button class="settings-btn" onclick="app.toggleSettings()" title="Settings">&#9881;</button>
+    </span>
+  </div>
+  <div id="messages">
+    <div style="flex:1"></div>
+    <div style="text-align:center;color:var(--text-muted);padding:40px;font-size:13px;">
+      Send a message to start a conversation.
+    </div>
+  </div>
+  <div id="input-area">
+    <div id="input-row">
+      <textarea id="prompt-input" rows="1" placeholder="Type a message... (Shift+Enter for newline)"></textarea>
+      <button id="send-btn" onclick="app.send()">Send</button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings Panel -->
+<div id="settings-panel">
+  <div class="sp-hdr">
+    <h3>Settings</h3>
+    <button class="sp-close" onclick="app.toggleSettings()">&times;</button>
+  </div>
+
+  <!-- Model Selection -->
+  <div class="sp-section">
+    <h4>Model</h4>
+    <div class="sp-current" id="sp-current-model">loading...</div>
+    <div id="sp-model-list"></div>
+  </div>
+
+  <!-- Toggles -->
+  <div class="sp-section">
+    <h4>Behavior</h4>
+    <div class="sp-row">
+      <label>Permission Mode</label>
+      <select class="sp-select" id="sp-permission" onchange="app.updateConfig('permission_mode', this.value)">
+        <option value="auto">Auto</option>
+        <option value="accept-all">Accept All</option>
+        <option value="manual">Manual</option>
+      </select>
+    </div>
+    <div class="sp-row">
+      <label>Thinking</label>
+      <div class="sp-toggle" id="sp-thinking" onclick="app.toggleConfig('thinking')"></div>
+    </div>
+    <div class="sp-row">
+      <label>Verbose</label>
+      <div class="sp-toggle" id="sp-verbose" onclick="app.toggleConfig('verbose')"></div>
+    </div>
+    <div class="sp-row">
+      <label>Max Tokens</label>
+      <input class="sp-input" type="number" id="sp-max-tokens" style="width:100px"
+        onchange="app.updateConfig('max_tokens', parseInt(this.value))">
+    </div>
+    <div class="sp-row">
+      <label>Thinking Budget</label>
+      <input class="sp-input" type="number" id="sp-thinking-budget" style="width:100px"
+        onchange="app.updateConfig('thinking_budget', parseInt(this.value))">
+    </div>
+  </div>
+
+  <!-- API Keys -->
+  <div class="sp-section">
+    <h4>API Keys</h4>
+    <div id="sp-api-keys"></div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">
+      Keys are session-only. Use env vars for persistence.
+    </div>
+  </div>
+
+  <!-- Quick Actions -->
+  <div class="sp-section">
+    <h4>Session</h4>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+      <button class="sp-btn" onclick="app.sendSlash('/compact')">Compact Context</button>
+      <button class="sp-btn" onclick="app.sendSlash('/status')">Status</button>
+      <button class="sp-btn" onclick="app.sendSlash('/context')">Context Usage</button>
+      <button class="sp-btn" onclick="app.sendSlash('/cost')">Cost</button>
+    </div>
+  </div>
+
+  <!-- Terminal Fallback -->
+  <div class="sp-section">
+    <h4>Advanced</h4>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+      <button class="sp-btn" onclick="window.open('/', '_blank')">Open Terminal</button>
+      <button class="sp-btn" onclick="app.sendSlash('/doctor')">Health Check</button>
+      <button class="sp-btn" onclick="app.sendSlash('/help')">Help</button>
+    </div>
+  </div>
+</div>
+
+<script src="/marked.min.js"></script>
+<script>
+// ── App ──────────────────────────────────────────────────────────────────
+
+class ChatApp {
+  constructor() {
+    this.sessionId = null;
+    this.ws = null;
+    this.streaming = false;
+    this._textBuf = '';
+    this._curMsgEl = null;
+    this._thinkEl = null;
+    this._toolCards = {};
+    this._toolCounter = 0;
+    this._approvalEl = null;
+    this._activityEl = null;
+    this._pendingApproval = false;
+    this._authed = false;
+  }
+
+  // ── Auth ────────────────────────────────────────────────────────
+
+  _showLogin() {
+    document.getElementById('login-overlay').style.display = 'flex';
+  }
+
+  _hideLogin() {
+    document.getElementById('login-overlay').style.display = 'none';
+  }
+
+  async doLogin(e) {
+    e.preventDefault();
+    const pwd = document.getElementById('login-pwd').value;
+    const errEl = document.getElementById('login-err');
+    errEl.textContent = '';
+    try {
+      const r = await fetch('/api/auth', {
+        method:'POST', credentials:'same-origin',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({token: pwd})
+      });
+      if (!r.ok) { errEl.textContent = 'Wrong password'; return; }
+      this._authed = true;
+      this._hideLogin();
+      this.loadSessions();
+    } catch(err) { errEl.textContent = 'Connection error'; }
+  }
+
+  async _fetchAuth(url, opts) {
+    const r = await fetch(url, {credentials:'same-origin', ...opts});
+    if (r.status === 401) {
+      this._showLogin();
+      throw new Error('auth required');
+    }
+    return r;
+  }
+
+  // ── Session management ──────────────────────────────────────────
+
+  async loadSessions() {
+    try {
+      const r = await this._fetchAuth('/api/sessions');
+      const data = await r.json();
+      const list = document.getElementById('session-list');
+      list.innerHTML = '';
+      (data.sessions || []).forEach(s => {
+        const el = document.createElement('div');
+        el.className = 'sess-item' + (s.id === this.sessionId ? ' active' : '');
+        el.innerHTML = `
+          <div class="sess-id"><span class="sess-dot ${s.busy?'':'idle'}"></span>${s.id}</div>
+          <div class="sess-info">${s.message_count} messages</div>`;
+        el.onclick = () => this.switchSession(s.id);
+        list.appendChild(el);
+      });
+    } catch(e) { console.error('loadSessions:', e); }
+  }
+
+  async newSession() {
+    this._disconnectWS();
+    this._clearChat();
+    try {
+      const r = await this._fetchAuth('/api/prompt', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({prompt: '', session_id: ''})
+      });
+      const data = await r.json();
+      if (r.ok && data.session_id) {
+        this.sessionId = data.session_id;
+        this._connectWS(this.sessionId);
+        this._showWelcome();
+      }
+    } catch(e) { console.error('newSession:', e); }
+    this.loadSessions();
+  }
+
+  async switchSession(sid) {
+    if (sid === this.sessionId) return;
+    this._disconnectWS();
+    this.sessionId = sid;
+    this._clearChat();
+    // Load history
+    try {
+      const r = await this._fetchAuth(`/api/sessions/${sid}`);
+      const data = await r.json();
+      (data.messages || []).forEach(m => {
+        if (m.role === 'user') this._addUserBubble(m.content);
+        else if (m.role === 'assistant') {
+          this._addAssistantBubble(m.content);
+          if (m.tool_calls) m.tool_calls.forEach(tc => {
+            this._addToolCard(tc.name, tc.inputs, tc.status, tc.result);
+          });
+        }
+      });
+    } catch(e) { console.error('switchSession:', e); }
+    this._connectWS(sid);
+    this.loadSessions();
+  }
+
+  // ── Send prompt ─────────────────────────────────────────────────
+
+  async send() {
+    const input = document.getElementById('prompt-input');
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    input.style.height = 'auto';
+
+    try {
+      // Ensure we have a session + WS connection
+      if (!this.sessionId) {
+        const r = await this._fetchAuth('/api/prompt', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({prompt: '', session_id: ''})
+        });
+        const data = await r.json();
+        if (!r.ok) {
+          input.value = text;
+          this._addError(data.error || `Server error (${r.status})`);
+          return;
+        }
+        this.sessionId = data.session_id;
+        this._connectWS(this.sessionId);
+        this.loadSessions();
+      }
+
+      this._addUserBubble(text);
+      this._showActivity('', 'Processing', 'connecting...');
+      this._scrollBottom();
+
+      // ── Slash commands ────────────────────────────────────────────
+      if (text.startsWith('/')) {
+        const longRunning = ['/brainstorm','/worker','/plan','/agent'];
+        const isLong = longRunning.some(c => text === c || text.startsWith(c + ' '));
+
+        if (isLong) {
+          // Long-running: SSE stream (server keeps connection open)
+          this._showActivity('', 'Running', text.split(' ')[0] + '...');
+          this._runSlashSSE(text);
+        } else {
+          // Quick commands: POST, events returned inline
+          this._showActivity('', 'Running', text.split(' ')[0] + '...');
+          const r = await this._fetchAuth('/api/prompt', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({prompt: text, session_id: this.sessionId})
+          });
+          const data = await r.json();
+          if (!r.ok) {
+            this._removeActivity();
+            this._addError(data.error || `Server error (${r.status})`);
+            return;
+          }
+          this._removeActivity();
+          (data.events || []).forEach(evt => this._handleEvent(evt));
+          if (!this.sessionId) this.sessionId = data.session_id;
+        }
+        return;
+      }
+
+      // ── Regular prompts: prefer WS ─────────────────────────────────
+      await this._ensureWS();
+      const wsOK = this.ws && this.ws.readyState === 1;
+      if (wsOK) {
+        this._showActivity('', 'Processing', 'sending to agent...');
+        this.ws.send(JSON.stringify({type: 'prompt', prompt: text}));
+      } else {
+        this._showActivity('', 'Processing', 'sending (http)...');
+        const r = await this._fetchAuth('/api/prompt', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({prompt: text, session_id: this.sessionId})
+        });
+        if (!r.ok) {
+          const data = await r.json();
+          this._addError(data.error || `Server error (${r.status})`);
+          return;
+        }
+        this._pollForResult();
+      }
+    } catch(e) {
+      input.value = text;
+      this._addError('Failed to send: ' + e.message);
+    }
+  }
+
+  _pollForResult() {
+    // Poll session state until agent finishes, then reload messages.
+    // This is the fallback when WS is not available.
+    if (this._polling) return;
+    this._polling = true;
+    this._pollCount = 0;
+    this.setStatus('running');
+    this._showActivity('', 'Working', 'waiting for response...');
+    const poll = async () => {
+      this._pollCount++;
+      try {
+        const r = await fetch(`/api/sessions/${this.sessionId}`, {credentials:'same-origin'});
+        if (!r.ok) { this._polling = false; this._removeActivity(); return; }
+        const data = await r.json();
+
+        // Update activity with poll count so user knows it's alive
+        const secs = this._pollCount * 2;
+        this._showActivity('', 'Working',
+          data.busy ? `running... (${secs}s)` : 'finishing...');
+
+        if (!data.busy) {
+          this._polling = false;
+          this._removeActivity();
+          this.setStatus('idle');
+          const msgs = data.messages || [];
+          const last = msgs[msgs.length - 1];
+          if (last && last.role === 'assistant') {
+            this._addAssistantBubble(last.content);
+            if (last.tool_calls) last.tool_calls.forEach(tc => {
+              this._addToolCard(tc.name, tc.inputs, tc.status, tc.result);
+            });
+          }
+          this.loadSessions();
+          // Try reconnecting WS now for future messages
+          if (this.sessionId && (!this.ws || this.ws.readyState !== 1)) {
+            this._connectWS(this.sessionId);
+          }
+          return;
+        }
+      } catch(e) { /* ignore */ }
+      if (this._polling) setTimeout(poll, 2000);
+    };
+    setTimeout(poll, 2000);
+  }
+
+  // ── WebSocket connection ────────────────────────────────────────
+
+  _connectWS(sid) {
+    this._disconnectWS();
+    this._wsRetries = (this._wsRetries || 0);
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const url = `${proto}//${location.host}/api/events`;
+    try {
+      this.ws = new WebSocket(url);
+    } catch(e) {
+      console.warn('[chat] WebSocket constructor failed:', e);
+      this.setStatus('no-ws');
+      return;
+    }
+    this._wsSessionId = sid;
+
+    this.ws.onopen = () => {
+      this._wsRetries = 0;
+      this.ws.send(JSON.stringify({session_id: sid}));
+      this.setStatus('connected');
+    };
+
+    this.ws.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.error) {
+          console.warn('[chat] WS server error:', data.error);
+          return;
+        }
+        this._handleEvent(data);
+      } catch(err) { console.error('[chat] ws parse:', err); }
+    };
+
+    this.ws.onclose = (ev) => {
+      console.log('[chat] WS closed, code:', ev.code, 'reason:', ev.reason);
+      if (ev.code === 1000) {
+        this.setStatus('idle');
+        return;
+      }
+      // Auto-reconnect with backoff (1s, 2s, 4s, max 10s)
+      if (this._wsSessionId && this.sessionId === this._wsSessionId) {
+        const delay = Math.min(1000 * Math.pow(2, this._wsRetries), 10000);
+        this._wsRetries++;
+        this.setStatus(this._wsRetries <= 2 ? 'connecting...' : 'reconnecting...');
+        setTimeout(() => {
+          if (this.sessionId === this._wsSessionId) {
+            this._connectWS(this._wsSessionId);
+          }
+        }, delay);
+      } else {
+        this.setStatus('idle');
+      }
+    };
+    this.ws.onerror = () => {};
+  }
+
+  _disconnectWS() {
+    if (this.ws) { try { this.ws.close(); } catch(e){} this.ws = null; }
+  }
+
+  _runSlashSSE(cmd) {
+    // Use fetch + ReadableStream to consume SSE events from POST /api/prompt.
+    // Server keeps the connection open and streams events as they happen.
+    const body = JSON.stringify({prompt: cmd, session_id: this.sessionId || ''});
+    fetch('/api/prompt', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'text/event-stream',
+      },
+      body,
+    }).then(response => {
+      if (!response.ok) {
+        this._removeActivity();
+        this._addError(`Server error (${response.status})`);
+        return;
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      const processChunk = ({done, value}) => {
+        if (done) {
+          this._removeActivity();
+          this.loadSessions();
+          return;
+        }
+        buffer += decoder.decode(value, {stream: true});
+        // Parse SSE lines
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';  // keep incomplete line
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const evt = JSON.parse(line.slice(6));
+              if (evt.type === 'session') {
+                if (!this.sessionId) {
+                  this.sessionId = evt.data.session_id;
+                  this.loadSessions();
+                }
+              } else if (evt.type === 'done') {
+                this._removeActivity();
+                this.loadSessions();
+              } else {
+                this._handleEvent(evt);
+              }
+            } catch(e) { /* skip bad JSON */ }
+          }
+        }
+        reader.read().then(processChunk);
+      };
+      reader.read().then(processChunk);
+    }).catch(err => {
+      this._removeActivity();
+      this._addError('Connection error: ' + err.message);
+    });
+  }
+
+  _ensureWS() {
+    // Wait up to 3s for WS to reach OPEN state.
+    // If WS is dead or missing, try reconnecting first.
+    return new Promise(resolve => {
+      // Already connected
+      if (this.ws && this.ws.readyState === 1) { resolve(); return; }
+      // Dead or missing — reconnect
+      if (!this.ws || this.ws.readyState >= 2) {
+        if (this.sessionId) this._connectWS(this.sessionId);
+      }
+      // Poll readyState
+      let elapsed = 0;
+      const iv = setInterval(() => {
+        elapsed += 50;
+        if (this.ws && this.ws.readyState === 1) {
+          clearInterval(iv); resolve(); return;
+        }
+        if (elapsed >= 3000) {
+          clearInterval(iv); resolve(); // give up, caller will POST fallback
+        }
+      }, 50);
+    });
+  }
+
+  // ── Event handling ──────────────────────────────────────────────
+
+  _handleEvent(evt) {
+    switch (evt.type) {
+      case 'text_chunk':
+        this._removeActivity();
+        if (!this._curMsgEl) this._startAssistantStream();
+        this._textBuf += evt.data.text;
+        this._renderStream();
+        break;
+
+      case 'thinking_chunk':
+        this._showActivity('thinking', 'Thinking', evt.data.text ? evt.data.text.slice(0,60) : '');
+        break;
+
+      case 'tool_start':
+        this._removeActivity();
+        this._addToolCard(evt.data.name, evt.data.inputs, 'running');
+        this._showActivity('tool-running', `Running ${evt.data.name}`, '');
+        break;
+
+      case 'tool_end':
+        this._removeActivity();
+        this._completeToolCard(evt.data.name, evt.data.result, evt.data.permitted);
+        break;
+
+      case 'permission_request':
+        this._removeActivity();
+        this._showApproval(evt.data.description);
+        break;
+
+      case 'permission_response':
+        this._resolveApproval(evt.data.granted);
+        break;
+
+      case 'turn_done':
+        this._removeActivity();
+        this._finishTurn(evt.data.input_tokens, evt.data.output_tokens);
+        break;
+
+      case 'status':
+        if (evt.data.state === 'running') {
+          this.setStatus('running');
+          this._showActivity('', 'Processing', '');
+        } else if (evt.data.state === 'idle') {
+          this._removeActivity();
+          this.setStatus('connected');
+          this.loadSessions();
+        }
+        break;
+
+      case 'command_result':
+        this._removeActivity();
+        this._addCommandResult(evt.data.command, evt.data.output);
+        break;
+
+      case 'interactive_menu':
+        this._removeActivity();
+        this._addInteractiveMenu(evt.data);
+        break;
+
+      case 'input_request':
+        this._removeActivity();
+        this._addInputRequest(evt.data);
+        break;
+
+      case 'error':
+        this._removeActivity();
+        this._addError(evt.data.message);
+        break;
+    }
+  }
+
+  // ── Rendering helpers ───────────────────────────────────────────
+
+  _clearChat() {
+    const el = document.getElementById('messages');
+    el.innerHTML = '<div style="flex:1"></div>';
+    this._curMsgEl = null; this._thinkEl = null; this._activityEl = null;
+    this._textBuf = ''; this._toolCards = {};
+    this._toolCounter = 0; this._approvalEl = null;
+    this._pendingApproval = false;
+  }
+
+  _addUserBubble(text) {
+    const el = document.createElement('div');
+    el.className = 'msg user';
+    el.innerHTML = `<div class="role-tag">You</div><div class="bubble"></div>`;
+    el.querySelector('.bubble').textContent = text;
+    document.getElementById('messages').appendChild(el);
+    this._scrollBottom();
+  }
+
+  _addAssistantBubble(content) {
+    const el = document.createElement('div');
+    el.className = 'msg assistant';
+    el.innerHTML = `<div class="role-tag">Assistant</div><div class="bubble"></div>`;
+    el.querySelector('.bubble').innerHTML = this._renderMd(content);
+    document.getElementById('messages').appendChild(el);
+    this._scrollBottom();
+  }
+
+  _startAssistantStream() {
+    this._removeActivity();
+    this._textBuf = '';
+    const el = document.createElement('div');
+    el.className = 'msg assistant';
+    el.innerHTML = `<div class="role-tag">Assistant</div><div class="bubble"></div>`;
+    document.getElementById('messages').appendChild(el);
+    this._curMsgEl = el.querySelector('.bubble');
+    this.streaming = true;
+  }
+
+  _renderStream() {
+    if (!this._curMsgEl) return;
+    if (!this._rafPending) {
+      this._rafPending = true;
+      requestAnimationFrame(() => {
+        this._rafPending = false;
+        if (this._curMsgEl) {
+          this._curMsgEl.innerHTML = this._renderMd(this._textBuf);
+          this._scrollBottom();
+        }
+      });
+    }
+  }
+
+  _renderMd(text) {
+    try {
+      // Sanitize: strip all raw HTML tags from the markdown source before
+      // rendering.  marked.parse() with {breaks:true} would otherwise
+      // preserve arbitrary <script>/<img onerror> etc. from model/tool output.
+      const clean = (text || '').replace(/<\/?[a-zA-Z][^>]*>/g, (tag) => {
+        return tag.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      });
+      return marked.parse(clean, {breaks:true});
+    }
+    catch(e) { return this._esc(text); }
+  }
+
+  _addToolCard(name, inputs, status, result) {
+    const id = 'tool-' + (this._toolCounter++);
+    const card = document.createElement('details');
+    card.className = 'tool-card' + (status==='done'?' done':'') + (status==='denied'?' denied':'');
+    card.id = id;
+    const inputStr = typeof inputs === 'string' ? inputs : JSON.stringify(inputs||{}, null, 2);
+    card.innerHTML = `
+      <summary>
+        ${status==='running'?'<div class="spinner"></div>':''}
+        <span class="tool-name">${this._esc(name)}</span>
+        <span class="tool-badge ${status}">${status}</span>
+      </summary>
+      <div class="tool-body">
+        <div class="label">Input</div>
+        <pre>${this._esc(inputStr)}</pre>
+        ${result ? `<div class="label">Output</div><pre>${this._esc(result)}</pre>` : ''}
+      </div>`;
+    document.getElementById('messages').appendChild(card);
+    this._toolCards[name + ':' + (this._toolCounter-1)] = card;
+    // Track last card for this tool name for completion matching
+    this._toolCards['__last__' + name] = card;
+    this._scrollBottom();
+  }
+
+  _completeToolCard(name, result, permitted) {
+    const card = this._toolCards['__last__' + name];
+    if (!card) return;
+    const status = permitted ? 'done' : 'denied';
+    card.className = 'tool-card ' + status;
+    const summary = card.querySelector('summary');
+    const spinner = summary.querySelector('.spinner');
+    if (spinner) spinner.remove();
+    const badge = summary.querySelector('.tool-badge');
+    badge.className = 'tool-badge ' + status;
+    badge.textContent = status;
+    if (result) {
+      const body = card.querySelector('.tool-body');
+      const existing = body.querySelectorAll('.label');
+      if (existing.length < 2) {
+        body.innerHTML += `<div class="label">Output</div><pre>${this._esc(result)}</pre>`;
+      }
+    }
+  }
+
+  _showApproval(description) {
+    const card = document.createElement('div');
+    card.className = 'approval-card';
+    card.innerHTML = `
+      <div class="ap-hdr">&#128274; Permission Required</div>
+      <div class="ap-desc">${this._esc(description)}</div>
+      <div class="ap-actions">
+        <button class="ap-btn allow" onclick="app.approve(true)">Allow</button>
+        <button class="ap-btn deny" onclick="app.approve(false)">Deny</button>
+      </div>`;
+    this._approvalEl = card;
+    this._pendingApproval = true;
+    document.getElementById('messages').appendChild(card);
+    this._scrollBottom();
+  }
+
+  _resolveApproval(granted) {
+    if (this._approvalEl) {
+      this._approvalEl.classList.add('resolved');
+      const badge = document.createElement('span');
+      badge.style.cssText = `font-size:11px;color:${granted?'var(--green)':'var(--red)'};margin-left:8px;`;
+      badge.textContent = granted ? '(allowed)' : '(denied)';
+      this._approvalEl.querySelector('.ap-hdr').appendChild(badge);
+      this._approvalEl = null;
+    }
+    this._pendingApproval = false;
+  }
+
+  approve(granted) {
+    if (!this._pendingApproval) return;
+    // Send via WS if available, else POST
+    if (this.ws && this.ws.readyState === 1) {
+      this.ws.send(JSON.stringify({type:'approve', granted}));
+    } else {
+      fetch('/api/approve', {
+        method:'POST', credentials:'same-origin',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({session_id: this.sessionId, granted})
+      }).catch(e => console.error('approve:', e));
+    }
+  }
+
+  _showActivity(type, label, detail) {
+    if (!this._activityEl) {
+      this._activityEl = document.createElement('div');
+      this._activityEl.className = 'activity-indicator';
+      this._activityEl.innerHTML = `
+        <div class="ai-spinner"></div>
+        <div class="ai-text">
+          <span class="ai-label"></span>
+          <span class="ai-dots"></span>
+          <span class="ai-detail"></span>
+        </div>
+        <div class="ai-progress"><div class="ai-fill"></div></div>`;
+      document.getElementById('messages').appendChild(this._activityEl);
+      this._scrollBottom();
+    }
+    // Update type/class
+    this._activityEl.className = 'activity-indicator' + (type ? ' ' + type : '');
+    this._activityEl.querySelector('.ai-label').textContent = label || 'Working';
+    const detailEl = this._activityEl.querySelector('.ai-detail');
+    if (detail) {
+      detailEl.textContent = detail;
+      detailEl.style.display = '';
+    } else {
+      detailEl.style.display = 'none';
+    }
+    this._scrollBottom();
+  }
+
+  _removeActivity() {
+    if (this._activityEl) {
+      this._activityEl.remove();
+      this._activityEl = null;
+    }
+    // Also remove legacy thinkEl if any
+    if (this._thinkEl) { this._thinkEl.remove(); this._thinkEl = null; }
+  }
+
+  _finishTurn(tokIn, tokOut) {
+    this._removeActivity();
+    this.streaming = false;
+    this._curMsgEl = null;
+    if (tokIn || tokOut) {
+      const meta = document.createElement('div');
+      meta.className = 'turn-meta';
+      meta.textContent = `${(tokIn||0).toLocaleString()} tokens in / ${(tokOut||0).toLocaleString()} tokens out`;
+      document.getElementById('messages').appendChild(meta);
+    }
+    this._scrollBottom();
+  }
+
+  _addInputRequest(data) {
+    const el = document.createElement('div');
+    el.className = 'msg assistant';
+    const uid = 'ir-' + Date.now();
+    el.innerHTML = `
+      <div class="role-tag" style="color:var(--accent)">Input Required</div>
+      <div style="background:var(--surface);border:1px solid var(--accent);border-radius:var(--radius-sm);
+        padding:12px 14px;max-width:min(500px,90%);">
+        <div style="font-size:13px;color:var(--text);margin-bottom:8px;">${this._esc(data.prompt)}</div>
+        <div style="display:flex;gap:6px;">
+          <input id="${uid}" type="text" placeholder="${this._esc(data.placeholder || '')}"
+            style="flex:1;background:var(--panel);border:1px solid var(--border);color:var(--text);
+            border-radius:var(--radius-sm);padding:6px 10px;font-size:13px;font-family:var(--font);outline:none;"
+            onkeydown="if(event.key==='Enter'){document.getElementById('${uid}-go').click()}">
+          <button id="${uid}-go" style="background:var(--accent);color:#000;border:none;padding:6px 14px;
+            border-radius:var(--radius-sm);font-weight:600;font-size:12px;cursor:pointer;"
+            onclick="(function(){
+              var v=document.getElementById('${uid}').value.trim();
+              var cmd='${data.command}' + (v ? ' ' + v : ' general project improvement');
+              document.getElementById('prompt-input').value=cmd;
+              app.send();
+              this.parentElement.parentElement.style.opacity='0.5';
+              this.parentElement.parentElement.style.pointerEvents='none';
+            }).call(this)">Go</button>
+        </div>
+      </div>`;
+    document.getElementById('messages').appendChild(el);
+    this._scrollBottom();
+    // Auto-focus the input
+    setTimeout(() => { const inp = document.getElementById(uid); if(inp) inp.focus(); }, 100);
+  }
+
+  _addInteractiveMenu(data) {
+    const icons = {bulb:'&#128161;',clipboard:'&#128203;',worker:'&#128119;',brain:'&#129504;',
+      sparkle:'&#10024;',search:'&#128270;',book:'&#128214;',chat:'&#128172;',test:'&#129514;',
+      note:'&#128221;',monitor:'&#128225;',robot:'&#129302;'};
+    const el = document.createElement('div');
+    el.className = 'msg assistant';
+    const items = (data.items || []).map(it =>
+      `<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;
+        border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface);
+        transition:background .15s;"
+        onmouseenter="this.style.background='var(--panel)'"
+        onmouseleave="this.style.background='var(--surface)'"
+        onclick="document.getElementById('prompt-input').value='${it.cmd}';app.send()">
+        <span style="font-size:16px;">${icons[it.icon]||'&#9654;'}</span>
+        <div>
+          <div style="font-size:12px;font-weight:600;color:var(--text);">${this._esc(it.label)}</div>
+          <div style="font-size:10px;font-family:var(--mono);color:var(--text-muted);">${this._esc(it.cmd)}</div>
+        </div>
+      </div>`).join('');
+    el.innerHTML = `<div class="role-tag" style="color:var(--accent)">SSJ Developer Mode</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;max-width:min(640px,95%);
+        margin-top:6px;">${items}</div>`;
+    document.getElementById('messages').appendChild(el);
+    this._scrollBottom();
+  }
+
+  _addCommandResult(command, output) {
+    const el = document.createElement('div');
+    el.className = 'msg assistant';
+    el.innerHTML = `<div class="role-tag" style="color:var(--accent)">System</div>
+      <div class="bubble" style="background:var(--surface);border:1px solid var(--border);
+        border-left:3px solid var(--accent);border-radius:var(--radius-sm);padding:12px 14px;">
+        <div style="font-family:var(--mono);font-size:11px;color:var(--accent);margin-bottom:6px;">${this._esc(command)}</div>
+        <pre style="white-space:pre-wrap;font-family:var(--mono);font-size:12px;color:var(--text-dim);
+          margin:0;background:none;border:none;padding:0;line-height:1.5;">${this._esc(output)}</pre>
+      </div>`;
+    document.getElementById('messages').appendChild(el);
+    this._scrollBottom();
+  }
+
+  _addError(msg) {
+    const el = document.createElement('div');
+    el.style.cssText = 'color:var(--red);font-size:13px;padding:8px 12px;background:var(--red-dim);border-radius:var(--radius-sm);margin:8px 0;max-width:min(640px,90%)';
+    el.textContent = msg;
+    document.getElementById('messages').appendChild(el);
+    this._scrollBottom();
+  }
+
+  _showWelcome() {
+    const el = document.getElementById('messages');
+    el.innerHTML = '<div style="flex:1"></div>';
+    const dash = document.createElement('div');
+    dash.style.cssText = 'max-width:680px;margin:0 auto;padding:20px 0;';
+    dash.innerHTML = `
+      <div style="text-align:center;margin-bottom:20px;">
+        <div style="font-size:28px;font-weight:700;color:var(--accent);margin-bottom:4px;">CheetahClaws</div>
+        <div style="font-size:13px;color:var(--text-muted);">AI Coding Assistant &bull; 11 Providers &bull; 60+ Tools</div>
+      </div>
+
+      ${this._dashSection('Core', [
+        this._dashCard('Write Code',    'Generate, edit, debug any language',     'Help me write a Python web scraper',  'var(--blue)'),
+        this._dashCard('Read & Search', 'Glob, Grep, Read files intelligently',   'Find all TODO comments in this repo', 'var(--green)'),
+        this._dashCard('Terminal',      'Run shell commands with safety checks',   'Show git log --oneline -10',          'var(--accent)'),
+        this._dashCard('Analyze',       'Understand codebases, explain logic',     'Explain the architecture of this project', 'var(--purple)'),
+      ])}
+
+      ${this._dashSection('Agent Features', [
+        this._dashCmd('/plan',       'Plan Mode',       'Read-only analysis, then implement step by step',  'var(--blue)'),
+        this._dashCmd('/brainstorm', 'Brainstorm',      'Multi-persona debate with synthesis & auto-tasks', 'var(--purple)'),
+        this._dashCmd('/worker',     'Auto Worker',     'Batch-implement pending tasks automatically',      'var(--green)'),
+        this._dashCmd('/agent',      'Autonomous Agent', 'Self-directed agent loop with templates',         'var(--accent)'),
+      ])}
+
+      ${this._dashSection('Session & Memory', [
+        this._dashCmd('/memory',     'Memory',      'Persistent context recalled across sessions',  'var(--blue)'),
+        this._dashCmd('/checkpoint', 'Checkpoints', 'Snapshot & rewind file changes',               'var(--green)'),
+        this._dashCmd('/save',       'Save/Load',   'Export and resume conversation sessions',      'var(--text-dim)'),
+        this._dashCmd('/cloudsave',  'Cloud Sync',  'Encrypted backup to GitHub Gist',              'var(--purple)'),
+      ])}
+
+      ${this._dashSection('Multi-Model', [
+        this._dashCmd('/model',    'Switch Model', 'Claude, GPT, Gemini, Ollama, DeepSeek, Qwen...', 'var(--accent)'),
+        this._dashCmd('/thinking', 'Thinking',     'Extended reasoning for complex problems',         'var(--blue)'),
+        this._dashCmd('/compact',  'Compact',      'Compress context when window is full',            'var(--green)'),
+        this._dashCmd('/config',   'Config',       'View and modify all runtime settings',            'var(--text-dim)'),
+      ])}
+
+      ${this._dashSection('Development Tools', [
+        this._dashCmd('/ssj',     'SSJ Mode',     'Integrated developer dashboard with power menu',  'var(--red)'),
+        this._dashCmd('/tasks',   'Task Manager', 'Create, track, complete development tasks',       'var(--accent)'),
+        this._dashCmd('/init',    'Init Project', 'Generate CLAUDE.md for your codebase',            'var(--blue)'),
+        this._dashCmd('/export',  'Export',       'Export conversation to Markdown file',             'var(--text-dim)'),
+      ])}
+
+      ${this._dashSection('Bridges & Media', [
+        this._dashCmd('/telegram', 'Telegram',   'Chat via Telegram bot bridge',         'var(--blue)'),
+        this._dashCmd('/slack',    'Slack',       'Chat via Slack workspace integration', 'var(--purple)'),
+        this._dashCmd('/voice',    'Voice Input', 'Speak to code with STT transcription', 'var(--green)'),
+        this._dashCmd('/image',    'Vision',      'Analyze screenshots and UI designs',   'var(--accent)'),
+      ])}
+
+      <div style="border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);padding:12px 14px;margin-top:12px;">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:8px;">Quick Status</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;">
+          ${['/status','/context','/cost','/permissions','/doctor','/skills','/help']
+            .map(c => this._cmdChip(c)).join('')}
+        </div>
+      </div>
+      <div style="text-align:center;margin-top:10px;font-size:11px;color:var(--text-muted);">
+        &#9881; Settings for model, API keys, permissions &bull; &#9790; Toggle dark/light theme
+      </div>`;
+    el.appendChild(dash);
+  }
+
+  _dashSection(title, cards) {
+    return `<div style="margin-bottom:12px;">
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:.6px;
+        color:var(--text-muted);margin-bottom:6px;padding-left:2px;">${title}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">${cards.join('')}</div>
+    </div>`;
+  }
+
+  _dashCard(title, desc, example, color) {
+    return `<div style="background:var(--surface);border:1px solid var(--border);
+      border-radius:var(--radius-sm);padding:10px 12px;cursor:pointer;
+      border-left:3px solid ${color};transition:background .15s;"
+      onmouseenter="this.style.background='var(--panel)'"
+      onmouseleave="this.style.background='var(--surface)'"
+      onclick="document.getElementById('prompt-input').value='${example}';document.getElementById('prompt-input').focus();">
+      <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:2px;">${title}</div>
+      <div style="font-size:11px;color:var(--text-muted);line-height:1.4;">${desc}</div>
+    </div>`;
+  }
+
+  _dashCmd(cmd, title, desc, color) {
+    return `<div style="background:var(--surface);border:1px solid var(--border);
+      border-radius:var(--radius-sm);padding:10px 12px;cursor:pointer;
+      border-left:3px solid ${color};transition:background .15s;"
+      onmouseenter="this.style.background='var(--panel)'"
+      onmouseleave="this.style.background='var(--surface)'"
+      onclick="document.getElementById('prompt-input').value='${cmd}';app.send()">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px;">
+        <span style="font-family:var(--mono);font-size:11px;color:${color};font-weight:600;">${cmd}</span>
+        <span style="font-size:12px;font-weight:600;color:var(--text);">${title}</span>
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);line-height:1.4;">${desc}</div>
+    </div>`;
+  }
+
+  _cmdChip(cmd) {
+    return `<span style="font-family:var(--mono);font-size:11px;padding:3px 8px;
+      background:var(--panel);border:1px solid var(--border);border-radius:4px;
+      cursor:pointer;color:var(--text-dim);transition:border-color .15s;"
+      onmouseenter="this.style.borderColor='var(--accent)'"
+      onmouseleave="this.style.borderColor='var(--border)'"
+      onclick="document.getElementById('prompt-input').value='${cmd}';app.send()">${cmd}</span>`;
+  }
+
+  _scrollBottom() {
+    const el = document.getElementById('messages');
+    requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+  }
+
+  _esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s || '';
+    return d.innerHTML;
+  }
+
+  setStatus(state) {
+    const dot = document.getElementById('status-dot');
+    const txt = document.getElementById('status-text');
+    dot.className = 'dot' + (state==='disconnected'?' off':'') + (state==='running'?' busy':'');
+    txt.textContent = state;
+  }
+
+  // ── Theme ───────────────────────────────────────────────────────
+
+  initTheme() {
+    const saved = localStorage.getItem('cc-theme') || 'dark';
+    this._applyTheme(saved);
+  }
+
+  toggleTheme() {
+    const current = document.documentElement.getAttribute('data-theme') || 'dark';
+    const next = current === 'dark' ? 'light' : 'dark';
+    this._applyTheme(next);
+    localStorage.setItem('cc-theme', next);
+  }
+
+  _applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    const btn = document.getElementById('theme-btn');
+    if (btn) btn.textContent = theme === 'dark' ? '\u263E' : '\u2600';
+  }
+
+  // ── Settings panel ──────────────────────────────────────────────
+
+  toggleSettings() {
+    const panel = document.getElementById('settings-panel');
+    const isOpen = panel.classList.contains('open');
+    if (isOpen) {
+      panel.classList.remove('open');
+    } else {
+      panel.classList.add('open');
+      this._loadSettings();
+    }
+  }
+
+  async _loadSettings() {
+    // Load config for current session
+    if (this.sessionId) {
+      try {
+        const r = await this._fetchAuth(`/api/config?sid=${this.sessionId}`);
+        const cfg = await r.json();
+        this._renderConfig(cfg);
+      } catch(e) { console.error('loadSettings:', e); }
+    }
+    // Load available models
+    try {
+      const r = await this._fetchAuth('/api/models');
+      const data = await r.json();
+      this._renderModels(data.providers || []);
+    } catch(e) { console.error('loadModels:', e); }
+  }
+
+  _renderConfig(cfg) {
+    // Current model
+    document.getElementById('sp-current-model').textContent = cfg.model || '(not set)';
+    // Permission mode
+    const permSel = document.getElementById('sp-permission');
+    permSel.value = cfg.permission_mode || 'auto';
+    // Toggles
+    document.getElementById('sp-thinking').className =
+      'sp-toggle' + (cfg.thinking ? ' on' : '');
+    document.getElementById('sp-verbose').className =
+      'sp-toggle' + (cfg.verbose ? ' on' : '');
+    // Numeric fields
+    document.getElementById('sp-max-tokens').value = cfg.max_tokens || 40000;
+    document.getElementById('sp-thinking-budget').value = cfg.thinking_budget || 10000;
+    // API keys status
+    const keysEl = document.getElementById('sp-api-keys');
+    const configured = cfg.api_keys_configured || {};
+    const providers = ['anthropic','openai','gemini','deepseek','ollama',
+                       'qwen','kimi','zhipu','minimax','custom'];
+    keysEl.innerHTML = providers.map(p => {
+      const has = configured[p] || p === 'ollama' || p === 'lmstudio';
+      return `<div class="sp-key-row">
+        <span class="key-dot ${has?'ok':'missing'}"></span>
+        <span class="provider-name">${p}</span>
+        ${p!=='ollama'&&p!=='lmstudio'
+          ? `<input class="sp-input" type="password" placeholder="${has?'(configured)':'API key...'}"
+              onchange="app.setApiKey('${p}', this.value)">`
+          : `<span style="font-size:11px;color:var(--text-muted)">no key needed</span>`}
+      </div>`;
+    }).join('');
+  }
+
+  _renderModels(providers) {
+    const listEl = document.getElementById('sp-model-list');
+    const currentModel = document.getElementById('sp-current-model').textContent;
+    listEl.innerHTML = providers.map(p => {
+      if (!p.models.length && p.provider !== 'ollama') return '';
+      const models = p.models.map(m => {
+        const full = `${p.provider}/${m}`;
+        const isActive = currentModel === full || currentModel === m;
+        return `<div class="sp-model-item${isActive?' active':''}"
+          onclick="app.selectModel('${full}')">${m}</div>`;
+      }).join('');
+      return `<details class="sp-model-group">
+        <summary>${p.provider} (${p.models.length})
+          ${!p.has_api_key && p.needs_api_key
+            ? '<span style="color:var(--red);font-size:10px"> no key</span>':''}
+        </summary>
+        ${models}
+      </details>`;
+    }).join('');
+  }
+
+  async selectModel(model) {
+    await this.updateConfig('model', model);
+    document.getElementById('sp-current-model').textContent = model;
+    // Re-render model list to update active state
+    document.querySelectorAll('.sp-model-item').forEach(el => {
+      el.classList.toggle('active', el.textContent.trim() === model.split('/').pop());
+    });
+  }
+
+  async toggleConfig(key) {
+    const el = document.getElementById('sp-' + key);
+    const isOn = el.classList.contains('on');
+    await this.updateConfig(key, !isOn);
+    el.classList.toggle('on');
+  }
+
+  async updateConfig(key, value) {
+    if (!this.sessionId) return;
+    try {
+      await this._fetchAuth('/api/config', {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({session_id: this.sessionId, config: {[key]: value}})
+      });
+    } catch(e) { console.error('updateConfig:', e); }
+  }
+
+  async setApiKey(provider, value) {
+    if (!value || !this.sessionId) return;
+    const keyMap = {
+      anthropic:'anthropic_api_key', openai:'openai_api_key',
+      gemini:'gemini_api_key', kimi:'kimi_api_key', qwen:'qwen_api_key',
+      zhipu:'zhipu_api_key', deepseek:'deepseek_api_key',
+      minimax:'minimax_api_key', custom:'custom_api_key',
+    };
+    await this.updateConfig(keyMap[provider], value);
+    // Update the dot indicator
+    const row = document.querySelector(`.sp-key-row .provider-name`);
+    // Reload settings to reflect change
+    this._loadSettings();
+  }
+
+  sendSlash(cmd) {
+    // Send a slash command as a regular prompt
+    const input = document.getElementById('prompt-input');
+    input.value = cmd;
+    this.send();
+    this.toggleSettings();
+  }
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────
+
+const app = new ChatApp();
+app.initTheme();
+app.loadSessions();
+app._showWelcome();
+
+// Input handling
+const promptInput = document.getElementById('prompt-input');
+promptInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    app.send();
+  }
+});
+promptInput.addEventListener('input', () => {
+  promptInput.style.height = 'auto';
+  promptInput.style.height = Math.min(promptInput.scrollHeight, 200) + 'px';
+});
+
+// Close sidebar on mobile when clicking outside
+document.getElementById('main').addEventListener('click', () => {
+  document.getElementById('sidebar').classList.remove('open');
+});
+</script>
+</body>
+</html>

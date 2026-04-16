@@ -15,6 +15,7 @@ Config keys (read by configure_from_config):
 from __future__ import annotations
 
 import json
+import os
 import sys
 import threading
 import time
@@ -84,12 +85,22 @@ def _emit(level_name: str, event: str, **fields: Any) -> None:
     record.update(fields)
     line = json.dumps(record, ensure_ascii=False, default=str)
     with _lock:
-        dest = _log_fh or sys.stderr
+        dest = _log_fh
+        if dest is None:
+            # In web terminal mode, suppress stderr JSON logs to avoid
+            # polluting the terminal output shown in the browser.
+            if _is_web_terminal:
+                return
+            dest = sys.stderr
         try:
             dest.write(line + "\n")
             dest.flush()
         except Exception:
             pass
+
+
+# Detect web terminal mode: set by web/server.py via env var
+_is_web_terminal = os.environ.get("CHEETAHCLAWS_WEB_TERMINAL") == "1"
 
 
 # ── Public helpers ─────────────────────────────────────────────────────────

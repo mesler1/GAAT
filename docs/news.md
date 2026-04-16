@@ -2,6 +2,18 @@
  
 ## 🔥🔥🔥 News (Pacific Time)
 
+- Apr 16, 2026 (**v3.05.73**): **Web UI — browser-based Chat UI + structured event API**
+  - **Web Chat UI** (`web/chat.html`) — `cheetahclaws --web` now serves a rich browser-based chat interface at `/chat` alongside the existing PTY terminal at `/`. Real-time streaming via SSE, tool cards, permission approval buttons, activity indicator, Markdown rendering with XSS sanitization, dark/light theme, mobile-responsive layout.
+  - **Structured event API** (`web/api.py`) — `ChatSession` class bridges `agent.run()` to WebSocket/SSE streams. 12 event types: `text_chunk`, `thinking_chunk`, `tool_start`, `tool_end`, `permission_request`, `turn_done`, `command_result`, `interactive_menu`, `input_request`, etc. Event buffer with replay for late-joining subscribers.
+  - **8 new API endpoints** — `POST /api/prompt`, `WS /api/events`, `POST /api/approve`, `GET /api/sessions`, `GET /api/sessions/{id}`, `GET/PATCH /api/config`, `GET /api/models`, `POST /api/auth`.
+  - **Settings panel** — model selector (11 providers), permission mode, thinking/verbose toggles, API key management, quick actions.
+  - **Slash command support** — all 45+ commands work in Chat UI. Quick commands return instantly. Long-running (`/brainstorm`, `/worker`, `/plan`, `/agent`) stream via SSE. `/ssj` renders clickable menu. `/brainstorm` shows topic input box.
+  - **SSJ sub-commands** — `/ssj debate`, `/ssj commit`, `/ssj readme` etc. run directly without showing the menu.
+  - **Feature dashboard** — 24 feature cards in 6 categories + 7 quick-command chips.
+  - **Security** — timing-safe auth, XSS sanitization, CORS origin echo, HttpOnly cookies, pre-upgrade auth for WS.
+  - **Docs** — new [Web UI Guide](guides/web-ui.md). README updated with Web UI section, API endpoints, CLI options.
+  - **Version bumped to 3.05.73.**
+
 - Apr 15, 2026 (**v3.05.72**): **Trading agent module**
   - **Trading agent** (`modular/trading/`) — AI-powered multi-agent trading analysis and backtesting system. 5-phase pipeline: data collection (11 technical indicators, fundamentals, news) → Bull/Bear researcher debate with BM25 memory → research judge → risk management panel (aggressive/conservative/neutral 3-way debate) → portfolio manager final decision (BUY/OVERWEIGHT/HOLD/UNDERWEIGHT/SELL). 4 built-in backtest strategies with equity and crypto engines. 7 AI tools, data source fallback chains (yfinance → coingecko → akshare). Post-trade reflection feeds lessons into BM25 memory. SSJ option 14 with guided sub-menu. Supports US/HK/A-share stocks and 20+ cryptos. Install: `pip install "cheetahclaws[trading]"`. Full guide: [docs/guides/trading.md](guides/trading.md).
 

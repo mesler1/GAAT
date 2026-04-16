@@ -32,6 +32,11 @@ def _is_in_slack_turn(config: dict) -> bool:
             or bool(runtime.get_ctx(config).in_slack_turn))
 
 
+def _is_in_web_turn(config: dict) -> bool:
+    import runtime
+    return bool(getattr(runtime.get_ctx(config), 'in_web_turn', False))
+
+
 # ── AskUserQuestion state ─────────────────────────────────────────────────
 
 _pending_questions: list[dict] = []
@@ -112,6 +117,20 @@ def ask_input_interactive(prompt: str, config: dict,
         text = _session_ctx.wx_input_value.strip()
         _session_ctx.wx_input_event = None
         _session_ctx.wx_input_value = ""
+        return text
+
+    # ── Web (chat API) ────────────────────────────────────────────────────
+    if getattr(_session_ctx, 'in_web_turn', False):
+        # Permission event is already pushed to WS by ChatSession._run_agent.
+        # Just block here until the browser responds via /api/approve.
+        evt = _threading.Event()
+        _session_ctx.web_input_event = evt
+        if not evt.wait(timeout=_INPUT_WAIT_TIMEOUT):
+            _session_ctx.web_input_event = None
+            return "(timeout: no input received)"
+        text = _session_ctx.web_input_value.strip()
+        _session_ctx.web_input_event = None
+        _session_ctx.web_input_value = ""
         return text
 
     # ── Telegram ───────────────────────────────────────────────────────────

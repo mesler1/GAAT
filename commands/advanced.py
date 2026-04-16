@@ -14,7 +14,7 @@ from ui.render import (
     clr, info, ok, warn, err,
     _start_tool_spinner, _stop_tool_spinner,
 )
-from tools import _is_in_tg_turn
+from tools import _is_in_tg_turn, _is_in_web_turn
 
 
 # ── Brainstorm ─────────────────────────────────────────────────────────────
@@ -83,7 +83,7 @@ def cmd_brainstorm(args: str, state, config) -> bool:
 
     user_topic = args.strip() or "general project improvement and architectural evolution"
 
-    if _is_in_tg_turn(config):
+    if _is_in_tg_turn(config) or _is_in_web_turn(config):
         agent_count = 5
     else:
         try:

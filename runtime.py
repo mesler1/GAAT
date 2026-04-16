@@ -83,6 +83,11 @@ class RuntimeContext:
     wx_current_user_id:   str = ""
     slack_current_channel: str = ""
 
+    # Web (chat API) bridge synchronization
+    web_input_event:  Optional[threading.Event] = None
+    web_input_value:  str = ""
+    in_web_turn:      bool = False
+
     # Transient per-turn data
     pending_image: Optional[str] = None
 

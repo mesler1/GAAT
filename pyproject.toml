@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cheetahclaws"
-version = "3.05.72"
+version = "3.05.73"
 description = "CheetahClaws: A Fast, Hackable Python AI Coding Assistant"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -60,12 +60,13 @@ packages = [
     "tools",
     "cc_mcp", "memory", "monitor", "multi_agent", "plugin", "skill", "task",
     "voice", "video", "checkpoint",
-    "ui", "bridges", "commands",
+    "ui", "web", "bridges", "commands",
     "modular", "modular.video", "modular.voice", "modular.trading",
     "modular.trading.data", "modular.trading.engines", "modular.trading.agents",
 ]
 
 [tool.setuptools.package-data]
+"web" = ["*.js", "*.css", "*.html", "*.ico", "*.png"]
 "modular.video" = ["PLUGIN.md"]
 "modular.voice" = ["PLUGIN.md"]
 "modular.trading" = ["PLUGIN.md", "skills/*.md", "agent_templates/*.md"]

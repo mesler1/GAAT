@@ -121,6 +121,22 @@ Other install methods: [pip install](#alternative-install-with-pip) | [uv instal
 ## 🔥🔥🔥 News (Pacific Time)
 
  
+- Apr 16, 2026 (**v3.05.73**): **Web UI — browser-based Chat UI + structured event API**
+  - **Web Chat UI** (`web/chat.html`) — `cheetahclaws --web` now serves a rich browser-based chat interface at `/chat` alongside the existing PTY terminal at `/`. Features: real-time streaming via Server-Sent Events (SSE), collapsible tool cards with status badges, inline permission approval buttons (Allow/Deny), activity indicator (spinner + state labels for Thinking/Running/Processing), Markdown rendering with XSS sanitization (`marked.js` bundled), dark/light theme toggle with `localStorage` persistence, mobile-responsive layout with sidebar overlay.
+  - **Structured event API** (`web/api.py`) — new `ChatSession` class bridges `agent.run()` generator to WebSocket/SSE event streams following the same pattern as the Telegram/Slack/WeChat bridges. Events: `text_chunk`, `thinking_chunk`, `tool_start`, `tool_end`, `permission_request`, `permission_response`, `turn_done`, `command_result`, `interactive_menu`, `input_request`, `status`, `error`. Event buffer with replay for late-joining subscribers.
+  - **8 new API endpoints** — `POST /api/prompt` (submit prompt or slash command), `WS /api/events` (real-time event stream), `POST /api/approve` (permission response), `GET /api/sessions` (list sessions), `GET /api/sessions/{id}` (session details + message history), `GET/PATCH /api/config` (read/write config), `GET /api/models` (list all 11 providers and models), `POST /api/auth` (login, sets HttpOnly cookie).
+  - **Settings panel** — click ⚙ to open: model selector grouped by 11 providers (Anthropic, OpenAI, Gemini, Ollama, DeepSeek, Qwen, etc.), permission mode dropdown, thinking/verbose toggles, max tokens input, per-provider API key management with status indicators, quick action buttons (Compact/Status/Cost/Context), terminal link for fallback.
+  - **Slash command support in Chat UI** — all 45+ commands work. Quick commands (`/status`, `/help`, `/model`, `/context`) return results instantly via POST response. Long-running commands (`/brainstorm`, `/worker`, `/plan`, `/agent`) stream events in real-time via SSE (server keeps HTTP connection open). `/ssj` renders a clickable 12-item interactive menu. `/brainstorm` (no args) shows a topic input box before starting.
+  - **SSJ sub-commands** — `/ssj debate`, `/ssj commit`, `/ssj readme`, `/ssj scan`, `/ssj propose`, `/ssj review` now run directly as agent queries without showing the interactive menu. The menu only appears for `/ssj` (no args).
+  - **Feature dashboard** — welcome page shows 24 feature cards organized in 6 categories (Core, Agent Features, Session & Memory, Multi-Model, Development Tools, Bridges & Media) with 7 clickable quick-command chips.
+  - **Security hardening** — `hmac.compare_digest()` for timing-safe token comparison, XSS sanitization (HTML tags escaped before Markdown rendering), CORS restricted to request Origin echo (no wildcard), HttpOnly + SameSite=Strict cookies, auth checked before WebSocket upgrade, `_BufferedSocket` wrapper replaces fragile `sock.recv` monkey-patching.
+  - **Session management** — chat sessions with idle timeout (30 min), background reaper for orphaned sessions, session list in sidebar with message count and busy indicator, click to switch, "+" to create new.
+  - **Web bridge integration** — `RuntimeContext` extended with `web_input_event`, `web_input_value`, `in_web_turn` fields. `tools/interaction.py` routes permission prompts to web bridge via `threading.Event` synchronization. `commands/advanced.py` detects web turns and skips interactive prompts (uses defaults like Telegram bridge).
+  - **Thread-safe stdout streaming** — `_ThreadLocalStdout` intercepts `print()` only from the target command thread, broadcasts as `text_chunk` events. Other threads unaffected.
+  - **`pyproject.toml` packaging** — `web` package added to `packages` list, `*.js`, `*.css`, `*.html` added to `package-data`. Static assets (`xterm.min.js`, `marked.min.js`, `chat.html`) correctly included in `pip install` distributions.
+  - **Docs** — new [Web UI Guide](docs/guides/web-ui.md) (304 lines): quick start, full feature list, settings panel, API reference with JSON examples for all 8 endpoints and 12 event types, architecture notes, troubleshooting. README updated with Web UI section, feature table entry, CLI options, and examples.
+  - **Version bumped to 3.05.73.**
+
 - Apr 15, 2026 (**v3.05.72**): **Trading agent, error classifier, parallel tools, prompt injection detection, SQLite sessions, tool cache, auxiliary model, safe stdio**
   - **Trading agent module** (`modular/trading/`) — AI-powered multi-agent trading analysis and backtesting system. 5-phase analysis pipeline: data collection (technical indicators, fundamentals, news) → Bull/Bear researcher debate with BM25 memory → research judge recommendation → risk management panel (aggressive/conservative/neutral 3-way debate) → portfolio manager final decision (BUY/OVERWEIGHT/HOLD/UNDERWEIGHT/SELL). 4 built-in backtest strategies (dual MA, RSI mean reversion, Bollinger breakout, MACD crossover) with equity and crypto engines. 7 AI tools (`GetMarketData`, `GetPrice`, `GetTechnicalIndicators`, `GetFundamentals`, `GetNews`, `RunBacktest`, `TradingMemory`). 11 pure-Python technical indicators. Data source fallback chains (yfinance → coingecko → akshare). Post-trade reflection mechanism feeds lessons back into BM25 memory. SSJ integration as option 14 with guided sub-menu. Supports US/HK/A-share stocks and 20+ cryptos. Install: `pip install "cheetahclaws[trading]"`.
   - **Error classifier** (`error_classifier.py`) — centralized API error taxonomy (auth, billing, rate_limit, context_overflow, model_not_found, overloaded, connection, timeout) with per-category recovery hints, retryability, and backoff multipliers. Replaces fragile string matching in `agent.py` and `cheetahclaws.py`.
@@ -194,6 +210,7 @@ CheetahClaws: **A Lightweight** and **Easy-to-Use** Python Reimplementation of C
   * [Usage: Open-Source Models (Local)](#usage-open-source-models-local)
   * [Model Name Format](#model-name-format)
   * [Trading Agent](#trading-agent) (multi-agent analysis, backtesting, memory)
+  * [Web UI](#web-ui) (chat interface, settings, API endpoints)
   * [Documentation](#documentation) (guides for all features)
   * [Contributing](#contributing)
   * [FAQ](#faq)
@@ -255,6 +272,7 @@ Claude Code is a powerful, production-grade AI coding assistant — but its sour
 - **Rich Live streaming rendering** — When `rich` is installed, responses stream as live-updating Markdown in place (no duplicate raw text), with clean tool-call interleaving.
 - **Native Ollama reasoning** — Local reasoning models (deepseek-r1, qwen3, gemma4) stream their `<think>` tokens directly to the terminal via `ThinkingChunk` events; enable with `/verbose` and `/thinking`.
 - **Native Ollama vision** — `/image [prompt]` captures the clipboard and sends it to local vision models (llava, gemma4, llama3.2-vision) via Ollama's native image API. No cloud required.
+- **Built-in Web UI** — `--web` launches a pure-stdlib browser interface with a rich chat UI (`/chat`) and a full PTY terminal (`/`). Chat UI features: real-time SSE streaming, tool cards, permission approval buttons, SSJ interactive menu, `/brainstorm` topic input, model switcher (11 providers), dark/light theme, settings panel with API key management — all in one self-contained HTML file with zero external JS dependencies beyond bundled `marked.js` and `xterm.js`.
 - **Reliable multi-line paste** — Bracketed Paste Mode (`ESC[?2004h`) collects any pasted text — code blocks, multi-paragraph prompts, long diffs — as a single turn with zero latency and no blank-line artifacts.
 - **Rich Tab completion** — Tab after `/` shows all commands with one-line descriptions and subcommand hints; subcommand Tab-complete works for `/mcp`, `/plugin`, `/tasks`, `/cloudsave`, and more.
 - **Checkpoint & rewind** — `/checkpoint` lists all auto-snapshots of conversation + file state; `/checkpoint <id>` rewinds both files and history to any earlier point in the session.
@@ -395,6 +413,7 @@ Claude Code is a powerful, production-grade AI coding assistant — but its sour
 | Extended Thinking | Toggle on/off for Claude models; native `<think>` block streaming for local Ollama reasoning models (deepseek-r1, qwen3, gemma4) |
 | Cost tracking | Token usage + estimated USD cost |
 | Non-interactive mode | `--print` flag for scripting / CI |
+| **Web UI** | `--web` launches a browser-based interface with chat UI (`/chat`), PTY terminal (`/`), dark/light themes, settings panel, real-time SSE streaming for long-running commands |
 
 ---
 
@@ -910,12 +929,84 @@ US stocks (`AAPL`), HK stocks (`0700.HK`), A-shares (`000001.SZ`), crypto (`BTC`
 
 ---
 
+## Web UI
+
+CheetahClaws includes a built-in web interface — no external dependencies, no Node.js, no React. Pure Python stdlib server + self-contained HTML.
+
+### Quick start
+
+```bash
+cheetahclaws --web                          # localhost:8080, password protected
+cheetahclaws --web --port 8008              # custom port
+cheetahclaws --web --no-auth                # disable password (local use only)
+cheetahclaws --web --host 0.0.0.0           # network accessible
+```
+
+Open `http://localhost:8080/chat` for the **Chat UI** or `http://localhost:8080/` for the **PTY Terminal**.
+
+### Chat UI (`/chat`)
+
+A rich browser-based interface with real-time streaming — no SSH required, works on mobile.
+
+| Feature | Details |
+|---------|---------|
+| **Streaming chat** | Messages stream in real-time via Server-Sent Events (SSE) |
+| **Tool cards** | Collapsible cards show tool name, inputs, outputs, status (running/done/denied) |
+| **Permission approval** | Interactive Allow/Deny buttons for tool approval |
+| **Slash commands** | All 45+ commands work: `/status`, `/model`, `/brainstorm`, `/ssj`, `/plan`, etc. |
+| **SSJ Developer Mode** | `/ssj` renders a clickable 12-item menu; sub-commands (`/ssj debate`, `/ssj commit`) run directly |
+| **Brainstorm** | `/brainstorm` asks for topic first, then streams the multi-agent debate in real-time |
+| **Settings panel** | Click ⚙ to change model (11 providers), toggle thinking/verbose, set API keys, adjust permissions |
+| **Model switching** | Browse models by provider, switch mid-conversation |
+| **Dark/Light theme** | Click ☾/☀ to toggle; persisted in localStorage |
+| **Session management** | Sidebar lists all sessions; click to switch; "+" to create new |
+| **Feature dashboard** | Welcome page with 24 feature cards organized in 6 categories, clickable quick commands |
+| **Mobile responsive** | Sidebar collapses to overlay on small screens |
+| **Cookie auth** | HttpOnly + SameSite=Strict cookie; password displayed on server startup |
+
+### PTY Terminal (`/`)
+
+Full xterm.js terminal in the browser — 100% feature parity with the CLI.
+
+| Feature | Details |
+|---------|---------|
+| **WebSocket + SSE fallback** | Direct WS for speed, automatic SSE fallback through proxies |
+| **Terminal emulation** | xterm.js v5.5 with fit addon, web-links addon, 256-color support |
+| **Resize** | Auto-resize on window change; `SIGWINCH` forwarded to PTY |
+
+### Architecture
+
+```
+Browser ──→ /chat (Chat UI)     ──→ POST /api/prompt  ──→ Structured events (SSE/WS)
+        ──→ /     (PTY Terminal) ──→ WebSocket          ──→ Raw terminal bytes
+```
+
+Both interfaces share the same auth system, same port, same server process. The Chat UI uses structured events (`text_chunk`, `tool_start`, `tool_end`, `permission_request`, `turn_done`); the PTY terminal bridges raw I/O.
+
+### API Endpoints
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/prompt` | POST | Submit prompt or slash command; returns events inline for commands, streams via SSE for long-running |
+| `/api/events` | WS | Real-time structured event stream for a session |
+| `/api/approve` | POST | Respond to permission requests (Allow/Deny) |
+| `/api/sessions` | GET | List all chat sessions |
+| `/api/sessions/{id}` | GET | Get session details + message history |
+| `/api/config` | GET/PATCH | Read/update session config (model, permissions, etc.) |
+| `/api/models` | GET | List all providers and available models |
+| `/api/auth` | POST | Login; sets HttpOnly cookie |
+
+> **Full guide:** [docs/guides/web-ui.md](docs/guides/web-ui.md)
+
+---
+
 ## Documentation
 
 Detailed guides have been moved to [`docs/guides/`](docs/guides/) to keep this README focused. Click any link below:
 
 | Guide | What's Inside |
 |-------|---------------|
+| [**Web UI**](docs/guides/web-ui.md) | Chat UI, PTY terminal, API endpoints, settings panel, model switching, dark/light theme, SSE streaming, session management, authentication |
 | [**Reference**](docs/guides/reference.md) | CLI, 36+ commands, 33 built-in tools (incl. WebBrowse, ReadEmail, SendEmail, ReadPDF, ReadImage, ReadSpreadsheet), session search, auxiliary model, error classification, prompt injection detection, tool cache, parallel tools |
 | [**Extensions**](docs/guides/extensions.md) | Memory system, Skills, Sub-Agents, MCP servers, Plugin system, Monitor subscriptions, Autonomous Agents |
 | [**Bridges**](docs/guides/bridges.md) | Telegram, WeChat, Slack setup and remote control from your phone |
@@ -940,6 +1031,10 @@ Options:
   --accept-all         Auto-approve all operations (no permission prompts)
   --verbose            Show thinking blocks and per-turn token counts
   --thinking           Enable Extended Thinking (Claude only)
+  --web                Start web server (Chat UI + PTY terminal in browser)
+  --port PORT          Web server port (default: 8080)
+  --host HOST          Web server host (default: 127.0.0.1)
+  --no-auth            Disable web password (local use only)
   --version            Print version and exit
   -h, --help           Show help
 ```
@@ -963,6 +1058,10 @@ cheetahclaws --accept-all --print "Initialize a Python project with pyproject.to
 
 # Debug mode (see tokens + thinking)
 cheetahclaws --thinking --verbose
+
+# Web UI (browser-based chat + terminal)
+cheetahclaws --web
+cheetahclaws --web --port 8008 --no-auth
 ```
 
 See [Reference Guide](docs/guides/reference.md) for the full list of 36+ slash commands, tool descriptions, and configuration options.
