@@ -97,6 +97,14 @@ def _get_web_commands() -> dict:
             ("unsubscribe", "cmd_unsubscribe"),
             ("monitor", "cmd_monitor"),
         ]),
+        # External bridges — telegram / slack / wechat / voice.
+        # Each lives in its own module so missing deps (e.g. sounddevice for
+        # voice) just skip that one command instead of blocking the rest.
+        ("bridges.telegram", [("telegram", "cmd_telegram")]),
+        ("bridges.slack",    [("slack",    "cmd_slack")]),
+        ("bridges.wechat",   [("wechat",   "cmd_wechat"),
+                              ("weixin",   "cmd_wechat")]),
+        ("modular.voice.cmd", [("voice",   "cmd_voice")]),
     ]
     import importlib
     for mod_name, pairs in _imports:
@@ -177,15 +185,37 @@ _API_KEY_CONFIG_MAP = {
 
 
 class ChatSession:
-    """One agent conversation, bridged to WebSocket clients."""
+    """One agent conversation, bridged to WebSocket clients.
 
-    def __init__(self, base_config: dict):
-        self.session_id: str = uuid.uuid4().hex[:12]
-        self.created_at: float = time.monotonic()
-        self.last_active: float = time.monotonic()
+    Persistence: session metadata and message history are mirrored to SQLite
+    via web.db.repo. The in-memory `messages` list is a write-through cache
+    for fast replay; event queue/buffer stay in-memory only.
+    """
+
+    def __init__(self, base_config: dict, user_id: int, *,
+                 session_id: Optional[str] = None,
+                 title: Optional[str] = None):
+        from web import db as _db
+        _db.init_db()
+
+        # Hydrate-from-DB path vs new-session path
+        existing = (_db.repo.get_session(session_id, user_id)
+                    if session_id else None)
+
+        self.session_id: str = (existing["id"] if existing
+                                else (session_id or uuid.uuid4().hex[:12]))
+        self.user_id: int = user_id
+        self.title: str = (existing["title"] if existing
+                           else (title or "New chat"))
+        self.created_at: float = (existing["created_at"] if existing
+                                  else time.time())
+        self.last_active: float = time.time()
 
         # Deep-copy config so permission_mode changes don't leak
-        self.config: dict = copy.deepcopy(base_config)
+        base = copy.deepcopy(base_config)
+        if existing and existing.get("config"):
+            base.update(existing["config"])
+        self.config: dict = base
         self.config["_session_id"] = self.session_id
 
         # Event fan-out: multiple WS clients can subscribe
@@ -202,9 +232,18 @@ class ChatSession:
         self._agent_thread: Optional[threading.Thread] = None
         self._busy = threading.Event()
 
-        # Message history for UI replay on reconnect
-        self.messages: list[dict] = []
+        # Message history for UI replay on reconnect (hydrated from DB)
+        self.messages: list[dict] = (_db.repo.get_messages(self.session_id)
+                                     if existing else [])
         self._msg_lock = threading.Lock()
+
+        # Persist (create-or-update) metadata
+        _db.repo.upsert_session(
+            self.session_id, user_id,
+            title=self.title,
+            config={k: v for k, v in self.config.items()
+                    if k in _SAFE_CONFIG_KEYS},
+        )
 
         self._init_runtime()
 
@@ -776,6 +815,24 @@ class ChatSession:
     def _append_msg(self, msg: dict):
         with self._msg_lock:
             self.messages.append(msg)
+        # Persist to DB (best-effort; don't break streaming on DB failure)
+        try:
+            from web import db as _db
+            _db.repo.append_message(
+                self.session_id,
+                msg.get("role", "system"),
+                msg.get("content", "") or "",
+                msg.get("tool_calls"),
+            )
+            # Keep in-memory title in sync with auto-titling in repo
+            sess = _db.repo.get_session(self.session_id, self.user_id)
+            if sess and sess["title"] != self.title:
+                self.title = sess["title"]
+        except Exception as exc:  # noqa: BLE001
+            from web.logging_setup import get_logger
+            get_logger("api").exception("message persist failed",
+                                         extra={"session_id": self.session_id,
+                                                "err": str(exc)})
 
     def get_messages(self) -> list[dict]:
         with self._msg_lock:
@@ -799,6 +856,20 @@ class ChatSession:
         for k, v in updates.items():
             if k in _WRITABLE_CONFIG_KEYS:
                 self.config[k] = v
+        # Persist non-secret config keys to DB (secrets stay session-only)
+        try:
+            from web import db as _db
+            _db.repo.upsert_session(
+                self.session_id, self.user_id,
+                title=self.title,
+                config={k: v for k, v in self.config.items()
+                        if k in _SAFE_CONFIG_KEYS},
+            )
+        except Exception as exc:  # noqa: BLE001
+            from web.logging_setup import get_logger
+            get_logger("api").exception("config persist failed",
+                                         extra={"session_id": self.session_id,
+                                                "err": str(exc)})
         return self.get_safe_config()
 
     def is_idle(self) -> bool:
@@ -820,37 +891,146 @@ _chat_sessions: dict[str, ChatSession] = {}
 _chat_lock = threading.Lock()
 
 
-def create_chat_session(base_config: dict) -> ChatSession:
-    session = ChatSession(base_config)
+def create_chat_session(base_config: dict, user_id: int) -> ChatSession:
+    session = ChatSession(base_config, user_id=user_id)
     with _chat_lock:
         _chat_sessions[session.session_id] = session
     return session
 
 
-def get_chat_session(sid: str) -> Optional[ChatSession]:
+def get_chat_session(sid: str,
+                    user_id: Optional[int] = None,
+                    base_config: Optional[dict] = None) -> Optional[ChatSession]:
+    """Return a live ChatSession, hydrating from DB if necessary.
+
+    If the session isn't in the in-memory cache but exists in the DB (and is
+    owned by `user_id`), it's lazily rehydrated so restarts don't lose state.
+    `user_id` is required for DB hydration; pass None to skip hydration and
+    only look in memory (used by internal callers that already validated).
+    """
     with _chat_lock:
-        return _chat_sessions.get(sid)
-
-
-def list_chat_sessions() -> list[dict]:
+        sess = _chat_sessions.get(sid)
+        if sess:
+            # Enforce ownership even on cache hits — otherwise users could
+            # read each other's sessions whenever the cache is warm.
+            if user_id is not None and sess.user_id != user_id:
+                return None
+            return sess
+    if user_id is None or base_config is None:
+        return None
+    # Try to hydrate from DB
+    try:
+        from web import db as _db
+        row = _db.repo.get_session(sid, user_id)
+    except Exception:  # noqa: BLE001
+        return None
+    if not row:
+        return None
+    session = ChatSession(base_config, user_id=user_id, session_id=sid)
     with _chat_lock:
-        return [
-            {
-                "id": s.session_id,
-                "created_at": s.created_at,
-                "last_active": s.last_active,
-                "busy": s._busy.is_set(),
-                "message_count": len(s.messages),
-            }
-            for s in _chat_sessions.values()
-        ]
+        # Guard against a race where another thread hydrated concurrently.
+        existing = _chat_sessions.get(sid)
+        if existing:
+            return existing
+        _chat_sessions[sid] = session
+    return session
 
 
-def remove_chat_session(sid: str):
+def list_chat_sessions(user_id: int) -> list[dict]:
+    """List this user's sessions (DB is the source of truth, not memory)."""
+    try:
+        from web import db as _db
+        rows = _db.repo.list_sessions(user_id)
+    except Exception as exc:  # noqa: BLE001
+        from web.logging_setup import get_logger
+        get_logger("api").exception("list_sessions failed",
+                                     extra={"user_id": user_id,
+                                            "err": str(exc)})
+        rows = []
+    busy_ids = set()
+    with _chat_lock:
+        for sid, s in _chat_sessions.items():
+            if s._busy.is_set():
+                busy_ids.add(sid)
+    return [{**r, "busy": r["id"] in busy_ids} for r in rows]
+
+
+def remove_chat_session(sid: str, user_id: int) -> bool:
+    """Remove session from DB and in-memory cache. Returns True if removed."""
+    try:
+        from web import db as _db
+        deleted = _db.repo.delete_session(sid, user_id)
+    except Exception as exc:  # noqa: BLE001
+        from web.logging_setup import get_logger
+        get_logger("api").exception("delete_session failed",
+                                     extra={"session_id": sid,
+                                            "user_id": user_id,
+                                            "err": str(exc)})
+        deleted = False
     with _chat_lock:
         session = _chat_sessions.pop(sid, None)
     if session:
         session.cleanup()
+    return deleted
+
+
+def rename_chat_session(sid: str, user_id: int, title: str) -> bool:
+    try:
+        from web import db as _db
+        ok = _db.repo.rename_session(sid, user_id, title)
+    except Exception:  # noqa: BLE001
+        return False
+    if ok:
+        with _chat_lock:
+            s = _chat_sessions.get(sid)
+            if s:
+                s.title = title.strip()[:200] or "Untitled"
+    return ok
+
+
+def export_chat_session_markdown(sid: str, user_id: int) -> Optional[str]:
+    """Render a session's messages as Markdown. Returns None if not found."""
+    try:
+        from web import db as _db
+        meta = _db.repo.get_session(sid, user_id)
+        if not meta:
+            return None
+        msgs = _db.repo.get_messages(sid)
+    except Exception:  # noqa: BLE001
+        return None
+    import datetime as _dt
+    lines: list[str] = []
+    lines.append(f"# {meta['title']}")
+    lines.append("")
+    lines.append(f"- Session ID: `{sid}`")
+    lines.append(f"- Created: {_dt.datetime.fromtimestamp(meta['created_at']):%Y-%m-%d %H:%M}")
+    lines.append(f"- Messages: {len(msgs)}")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    for m in msgs:
+        role = m.get("role", "?")
+        when = _dt.datetime.fromtimestamp(m.get("created_at", 0)).strftime("%H:%M:%S")
+        lines.append(f"## {role.title()} · {when}")
+        lines.append("")
+        lines.append(m.get("content", "") or "_(no content)_")
+        if m.get("tool_calls"):
+            lines.append("")
+            lines.append("<details><summary>Tool calls</summary>")
+            lines.append("")
+            for tc in m["tool_calls"]:
+                lines.append(f"- **{tc.get('name','?')}** "
+                             f"(status: {tc.get('status','?')})")
+                if tc.get("inputs"):
+                    import json as _j
+                    lines.append("  ```json")
+                    lines.append("  " + _j.dumps(tc["inputs"], indent=2)
+                                 .replace("\n", "\n  "))
+                    lines.append("  ```")
+            lines.append("")
+            lines.append("</details>")
+        lines.append("")
+    return "\n".join(lines)
 
 
 def get_available_models() -> list[dict]:

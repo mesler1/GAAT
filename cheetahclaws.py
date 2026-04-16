@@ -1445,8 +1445,9 @@ def main():
     parser.add_argument("--setup", action="store_true", help="Run interactive setup wizard")
     parser.add_argument("--web", action="store_true",
                         help="Start web terminal (browser-based access)")
-    parser.add_argument("--port", type=int, default=8080,
-                        help="Port for web terminal (default: 8080)")
+    parser.add_argument("--port", type=int, default=None,
+                        help="Port for web terminal (default: 8080, "
+                             "auto-picks a free port if 8080 is taken)")
     parser.add_argument("--host", default="127.0.0.1",
                         help="Host for web terminal (default: 127.0.0.1, use 0.0.0.0 for network)")
     parser.add_argument("--no-auth", action="store_true",

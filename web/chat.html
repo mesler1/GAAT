@@ -4,24 +4,67 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>CheetahClaws Chat</title>
+<link rel="icon" type="image/png" sizes="256x256" href="/static/favicon.png">
+<link rel="icon" type="image/x-icon" sizes="any" href="/favicon.ico">
+<link rel="apple-touch-icon" href="/static/favicon.png">
+<script>
+  // Apply the saved theme BEFORE first paint to avoid a flash of the wrong
+  // theme. Keep in sync with initTheme() in /static/js/settings.js.
+  (function() {
+    try {
+      var t = localStorage.getItem('cc-theme');
+      if (t === 'light' || t === 'dark') {
+        document.documentElement.setAttribute('data-theme', t);
+      }
+      // No attribute → CSS @media (prefers-color-scheme: dark) handles it.
+    } catch(e) {}
+  })();
+</script>
 <style>
 /* ── Dark theme (default) ─────────────────────────────────────── */
-:root, [data-theme="dark"] {
-  --bg: #0b0b0e; --surface: #111116; --panel: #18181f; --panel2: #1e1e28;
-  --border: #252530; --border-dim: #1c1c24;
-  --text: #dcdce8; --text-dim: #9494ae; --text-muted: #6e6e88;
-  --accent: #e8a045; --accent-dim: rgba(232,160,69,0.1);
-  --green: #4ade80; --green-dim: rgba(74,222,128,0.1);
-  --red: #f87171; --red-dim: rgba(248,113,113,0.1);
-  --blue: #60a5fa; --blue-dim: rgba(96,165,250,0.1);
-  --yellow: #fbbf24; --purple: #c084fc;
+/* ── Theme variables ───────────────────────────────────────────
+ * Default (no data-theme attr): LIGHT, unless the OS prefers dark.
+ *   - [data-theme="light"] and [data-theme="dark"] force the theme and
+ *     override the system preference (user's explicit choice wins).
+ *   - When no attribute is set, @media (prefers-color-scheme: dark)
+ *     swaps in the dark palette automatically.
+ * Shared non-color tokens live on :root so they apply everywhere.
+ */
+:root {
   --radius: 10px; --radius-sm: 6px;
   --mono: 'JetBrains Mono','Fira Code','Cascadia Code',monospace;
   --font: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
   --sidebar-w: 260px;
-  --code-bg: #18181f; --shadow: rgba(0,0,0,0.3);
+
+  /* Light palette — the default */
+  --bg: #f5f5f7; --surface: #ffffff; --panel: #f0f0f3; --panel2: #e8e8ed;
+  --border: #d4d4dc; --border-dim: #e0e0e6;
+  --text: #1a1a2e; --text-dim: #555570; --text-muted: #8888a0;
+  --accent: #d08020; --accent-dim: rgba(208,128,32,0.08);
+  --green: #22a55a; --green-dim: rgba(34,165,90,0.08);
+  --red: #dc3545; --red-dim: rgba(220,53,69,0.06);
+  --blue: #2563eb; --blue-dim: rgba(37,99,235,0.06);
+  --yellow: #ca8a04; --purple: #7c3aed;
+  --code-bg: #f0f0f3; --shadow: rgba(0,0,0,0.08);
 }
-/* ── Light theme ─────────────────────────────────────────────── */
+
+/* ── System-dark fallback: only applies when the user has NOT
+ *    explicitly chosen a theme (no data-theme attribute). ─────── */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --bg: #0b0b0e; --surface: #111116; --panel: #18181f; --panel2: #1e1e28;
+    --border: #252530; --border-dim: #1c1c24;
+    --text: #dcdce8; --text-dim: #9494ae; --text-muted: #6e6e88;
+    --accent: #e8a045; --accent-dim: rgba(232,160,69,0.1);
+    --green: #4ade80; --green-dim: rgba(74,222,128,0.1);
+    --red: #f87171; --red-dim: rgba(248,113,113,0.1);
+    --blue: #60a5fa; --blue-dim: rgba(96,165,250,0.1);
+    --yellow: #fbbf24; --purple: #c084fc;
+    --code-bg: #18181f; --shadow: rgba(0,0,0,0.3);
+  }
+}
+
+/* ── Explicit overrides (user clicked the toggle) ───────────── */
 [data-theme="light"] {
   --bg: #f5f5f7; --surface: #ffffff; --panel: #f0f0f3; --panel2: #e8e8ed;
   --border: #d4d4dc; --border-dim: #e0e0e6;
@@ -32,6 +75,17 @@
   --blue: #2563eb; --blue-dim: rgba(37,99,235,0.06);
   --yellow: #ca8a04; --purple: #7c3aed;
   --code-bg: #f0f0f3; --shadow: rgba(0,0,0,0.08);
+}
+[data-theme="dark"] {
+  --bg: #0b0b0e; --surface: #111116; --panel: #18181f; --panel2: #1e1e28;
+  --border: #252530; --border-dim: #1c1c24;
+  --text: #dcdce8; --text-dim: #9494ae; --text-muted: #6e6e88;
+  --accent: #e8a045; --accent-dim: rgba(232,160,69,0.1);
+  --green: #4ade80; --green-dim: rgba(74,222,128,0.1);
+  --red: #f87171; --red-dim: rgba(248,113,113,0.1);
+  --blue: #60a5fa; --blue-dim: rgba(96,165,250,0.1);
+  --yellow: #fbbf24; --purple: #c084fc;
+  --code-bg: #18181f; --shadow: rgba(0,0,0,0.3);
 }
 * { margin:0; padding:0; box-sizing:border-box; }
 body { background:var(--bg); color:var(--text); font-family:var(--font);
@@ -59,6 +113,14 @@ body { background:var(--bg); color:var(--text); font-family:var(--font);
   border-radius:var(--radius-sm); font-weight:600; font-size:12px; cursor:pointer;
 }
 #sidebar .new-btn:hover { opacity:.85; }
+.sess-search { padding:8px 10px 4px; }
+.sess-search input {
+  width:100%; box-sizing:border-box; padding:6px 10px;
+  background:var(--panel); border:1px solid var(--border);
+  border-radius:var(--radius-sm); color:var(--text); font-size:12px;
+  font-family:var(--font); outline:none;
+}
+.sess-search input:focus { border-color:var(--accent); }
 #session-list { flex:1; overflow-y:auto; padding:8px; }
 .sess-item {
   padding:10px 12px; border-radius:var(--radius-sm); cursor:pointer;
@@ -66,11 +128,40 @@ body { background:var(--bg); color:var(--text); font-family:var(--font);
 }
 .sess-item:hover { background:var(--panel); }
 .sess-item.active { background:var(--panel); border-color:var(--accent); }
-.sess-item .sess-id { font-family:var(--mono); font-size:11px; color:var(--text-dim); }
-.sess-item .sess-info { font-size:11px; color:var(--text-muted); margin-top:3px; }
+.sess-item .sess-title {
+  font-size:13px; color:var(--text); font-weight:500;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  display:flex; align-items:center; gap:6px;
+}
+.sess-item .sess-info {
+  font-size:11px; color:var(--text-muted); margin-top:3px;
+  display:flex; justify-content:space-between; gap:6px;
+}
 .sess-item .sess-dot { display:inline-block; width:6px; height:6px; border-radius:50%;
-  background:var(--green); margin-right:6px; vertical-align:middle; }
+  background:var(--green); flex-shrink:0; }
 .sess-item .sess-dot.idle { background:var(--text-muted); }
+.sess-empty { padding:18px 12px; text-align:center; color:var(--text-muted);
+  font-size:12px; }
+
+#sidebar-foot {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:10px 14px; border-top:1px solid var(--border);
+  font-size:12px; color:var(--text-dim);
+}
+#sidebar-foot .link-btn {
+  background:none; border:none; color:var(--accent); cursor:pointer;
+  font-size:12px; padding:2px 4px;
+}
+#sidebar-foot .link-btn:hover { text-decoration:underline; }
+
+#sess-menu .menu-item {
+  padding:7px 12px; cursor:pointer; border-radius:4px; color:var(--text);
+}
+#sess-menu .menu-item:hover { background:var(--panel); color:var(--accent); }
+#sess-menu .menu-item.danger:hover { color:var(--red); }
+#sess-menu .menu-sep {
+  height:1px; background:var(--border); margin:4px 6px;
+}
 
 /* ── Main area ────────────────────────────────────────────────── */
 #main { flex:1; display:flex; flex-direction:column; min-width:0; }
@@ -349,19 +440,30 @@ body { background:var(--bg); color:var(--text); font-family:var(--font);
 </head>
 <body>
 
-<!-- Login overlay (shown when API returns 401) -->
+<!-- Login / register overlay (shown when API returns 401 or on first visit) -->
 <div id="login-overlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;
-  background:rgba(0,0,0,0.95);z-index:300;display:none;align-items:center;justify-content:center;
+  background:rgba(0,0,0,0.95);z-index:300;align-items:center;justify-content:center;
   font-family:var(--font);">
-  <form onsubmit="app.doLogin(event)" style="background:var(--surface);border:1px solid var(--border);
-    border-radius:12px;padding:2rem;width:320px;text-align:center;">
-    <h2 style="color:var(--accent);margin-bottom:1rem;font-size:1.2rem;">CheetahClaws Chat</h2>
-    <input type="password" id="login-pwd" placeholder="Enter password" autofocus
-      style="width:100%;padding:10px;background:var(--panel);border:1px solid var(--border);
-      border-radius:8px;color:var(--text);font-size:1rem;margin-bottom:1rem;text-align:center;letter-spacing:2px;">
-    <button type="submit" style="background:var(--accent);color:#000;border:none;padding:10px 24px;
-      border-radius:8px;font-weight:700;font-size:0.9rem;cursor:pointer;width:100%;">Connect</button>
-    <div id="login-err" style="color:var(--red);font-size:0.85rem;margin-top:0.5rem;"></div>
+  <form onsubmit="app.doAuth(event)" style="background:var(--surface);border:1px solid var(--border);
+    border-radius:12px;padding:2rem;width:340px;text-align:center;">
+    <h2 style="color:var(--accent);margin-bottom:.25rem;font-size:1.25rem;">CheetahClaws</h2>
+    <div id="auth-mode-label" style="color:var(--text-dim);font-size:.8rem;margin-bottom:1rem;">
+      Sign in to continue
+    </div>
+    <input type="text" id="login-username" placeholder="Username" autocomplete="username" autofocus
+      style="width:100%;padding:10px 12px;background:var(--panel);border:1px solid var(--border);
+      border-radius:8px;color:var(--text);font-size:.95rem;margin-bottom:.6rem;box-sizing:border-box;">
+    <input type="password" id="login-pwd" placeholder="Password" autocomplete="current-password"
+      style="width:100%;padding:10px 12px;background:var(--panel);border:1px solid var(--border);
+      border-radius:8px;color:var(--text);font-size:.95rem;margin-bottom:1rem;box-sizing:border-box;">
+    <button type="submit" id="auth-submit-btn"
+      style="background:var(--accent);color:#000;border:none;padding:10px 24px;
+      border-radius:8px;font-weight:700;font-size:.9rem;cursor:pointer;width:100%;">Sign in</button>
+    <div id="login-err" style="color:var(--red);font-size:.85rem;margin-top:.5rem;min-height:1.2em;"></div>
+    <div style="margin-top:.75rem;font-size:.8rem;color:var(--text-muted);">
+      <a href="#" id="auth-toggle-link" onclick="app.toggleAuthMode(event)"
+         style="color:var(--accent);text-decoration:none;">First time? Create an account</a>
+    </div>
   </form>
 </div>
 
@@ -371,8 +473,21 @@ body { background:var(--bg); color:var(--text); font-family:var(--font);
     <h2>CheetahClaws</h2>
     <button class="new-btn" onclick="app.newSession()">+ New</button>
   </div>
+  <div class="sess-search">
+    <input id="sess-search-input" type="text" placeholder="Search sessions..."
+      oninput="app._renderSessionList()" autocomplete="off">
+  </div>
   <div id="session-list"></div>
+  <div id="sidebar-foot">
+    <span id="sidebar-user">—</span>
+    <button class="link-btn" onclick="app.logout()" title="Sign out">Sign out</button>
+  </div>
 </aside>
+
+<!-- Session context menu (right-click) -->
+<div id="sess-menu" style="display:none;position:fixed;z-index:400;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:4px;min-width:160px;
+  box-shadow:0 6px 20px rgba(0,0,0,.35);font-size:13px;"></div>
 
 <!-- Main -->
 <div id="main">
@@ -477,1062 +592,15 @@ body { background:var(--bg); color:var(--text); font-family:var(--font);
 </div>
 
 <script src="/marked.min.js"></script>
-<script>
-// ── App ──────────────────────────────────────────────────────────────────
+<script src="/static/js/chat.js"></script>
+<script src="/static/js/util.js"></script>
+<script src="/static/js/auth.js"></script>
+<script src="/static/js/sidebar.js"></script>
+<script src="/static/js/tools.js"></script>
+<script src="/static/js/approval.js"></script>
+<script src="/static/js/settings.js"></script>
+<script src="/static/js/welcome.js"></script>
+<script src="/static/js/init.js"></script>
 
-class ChatApp {
-  constructor() {
-    this.sessionId = null;
-    this.ws = null;
-    this.streaming = false;
-    this._textBuf = '';
-    this._curMsgEl = null;
-    this._thinkEl = null;
-    this._toolCards = {};
-    this._toolCounter = 0;
-    this._approvalEl = null;
-    this._activityEl = null;
-    this._pendingApproval = false;
-    this._authed = false;
-  }
-
-  // ── Auth ────────────────────────────────────────────────────────
-
-  _showLogin() {
-    document.getElementById('login-overlay').style.display = 'flex';
-  }
-
-  _hideLogin() {
-    document.getElementById('login-overlay').style.display = 'none';
-  }
-
-  async doLogin(e) {
-    e.preventDefault();
-    const pwd = document.getElementById('login-pwd').value;
-    const errEl = document.getElementById('login-err');
-    errEl.textContent = '';
-    try {
-      const r = await fetch('/api/auth', {
-        method:'POST', credentials:'same-origin',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({token: pwd})
-      });
-      if (!r.ok) { errEl.textContent = 'Wrong password'; return; }
-      this._authed = true;
-      this._hideLogin();
-      this.loadSessions();
-    } catch(err) { errEl.textContent = 'Connection error'; }
-  }
-
-  async _fetchAuth(url, opts) {
-    const r = await fetch(url, {credentials:'same-origin', ...opts});
-    if (r.status === 401) {
-      this._showLogin();
-      throw new Error('auth required');
-    }
-    return r;
-  }
-
-  // ── Session management ──────────────────────────────────────────
-
-  async loadSessions() {
-    try {
-      const r = await this._fetchAuth('/api/sessions');
-      const data = await r.json();
-      const list = document.getElementById('session-list');
-      list.innerHTML = '';
-      (data.sessions || []).forEach(s => {
-        const el = document.createElement('div');
-        el.className = 'sess-item' + (s.id === this.sessionId ? ' active' : '');
-        el.innerHTML = `
-          <div class="sess-id"><span class="sess-dot ${s.busy?'':'idle'}"></span>${s.id}</div>
-          <div class="sess-info">${s.message_count} messages</div>`;
-        el.onclick = () => this.switchSession(s.id);
-        list.appendChild(el);
-      });
-    } catch(e) { console.error('loadSessions:', e); }
-  }
-
-  async newSession() {
-    this._disconnectWS();
-    this._clearChat();
-    try {
-      const r = await this._fetchAuth('/api/prompt', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({prompt: '', session_id: ''})
-      });
-      const data = await r.json();
-      if (r.ok && data.session_id) {
-        this.sessionId = data.session_id;
-        this._connectWS(this.sessionId);
-        this._showWelcome();
-      }
-    } catch(e) { console.error('newSession:', e); }
-    this.loadSessions();
-  }
-
-  async switchSession(sid) {
-    if (sid === this.sessionId) return;
-    this._disconnectWS();
-    this.sessionId = sid;
-    this._clearChat();
-    // Load history
-    try {
-      const r = await this._fetchAuth(`/api/sessions/${sid}`);
-      const data = await r.json();
-      (data.messages || []).forEach(m => {
-        if (m.role === 'user') this._addUserBubble(m.content);
-        else if (m.role === 'assistant') {
-          this._addAssistantBubble(m.content);
-          if (m.tool_calls) m.tool_calls.forEach(tc => {
-            this._addToolCard(tc.name, tc.inputs, tc.status, tc.result);
-          });
-        }
-      });
-    } catch(e) { console.error('switchSession:', e); }
-    this._connectWS(sid);
-    this.loadSessions();
-  }
-
-  // ── Send prompt ─────────────────────────────────────────────────
-
-  async send() {
-    const input = document.getElementById('prompt-input');
-    const text = input.value.trim();
-    if (!text) return;
-    input.value = '';
-    input.style.height = 'auto';
-
-    try {
-      // Ensure we have a session + WS connection
-      if (!this.sessionId) {
-        const r = await this._fetchAuth('/api/prompt', {
-          method: 'POST',
-          headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({prompt: '', session_id: ''})
-        });
-        const data = await r.json();
-        if (!r.ok) {
-          input.value = text;
-          this._addError(data.error || `Server error (${r.status})`);
-          return;
-        }
-        this.sessionId = data.session_id;
-        this._connectWS(this.sessionId);
-        this.loadSessions();
-      }
-
-      this._addUserBubble(text);
-      this._showActivity('', 'Processing', 'connecting...');
-      this._scrollBottom();
-
-      // ── Slash commands ────────────────────────────────────────────
-      if (text.startsWith('/')) {
-        const longRunning = ['/brainstorm','/worker','/plan','/agent'];
-        const isLong = longRunning.some(c => text === c || text.startsWith(c + ' '));
-
-        if (isLong) {
-          // Long-running: SSE stream (server keeps connection open)
-          this._showActivity('', 'Running', text.split(' ')[0] + '...');
-          this._runSlashSSE(text);
-        } else {
-          // Quick commands: POST, events returned inline
-          this._showActivity('', 'Running', text.split(' ')[0] + '...');
-          const r = await this._fetchAuth('/api/prompt', {
-            method: 'POST',
-            headers: {'Content-Type':'application/json'},
-            body: JSON.stringify({prompt: text, session_id: this.sessionId})
-          });
-          const data = await r.json();
-          if (!r.ok) {
-            this._removeActivity();
-            this._addError(data.error || `Server error (${r.status})`);
-            return;
-          }
-          this._removeActivity();
-          (data.events || []).forEach(evt => this._handleEvent(evt));
-          if (!this.sessionId) this.sessionId = data.session_id;
-        }
-        return;
-      }
-
-      // ── Regular prompts: prefer WS ─────────────────────────────────
-      await this._ensureWS();
-      const wsOK = this.ws && this.ws.readyState === 1;
-      if (wsOK) {
-        this._showActivity('', 'Processing', 'sending to agent...');
-        this.ws.send(JSON.stringify({type: 'prompt', prompt: text}));
-      } else {
-        this._showActivity('', 'Processing', 'sending (http)...');
-        const r = await this._fetchAuth('/api/prompt', {
-          method: 'POST',
-          headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({prompt: text, session_id: this.sessionId})
-        });
-        if (!r.ok) {
-          const data = await r.json();
-          this._addError(data.error || `Server error (${r.status})`);
-          return;
-        }
-        this._pollForResult();
-      }
-    } catch(e) {
-      input.value = text;
-      this._addError('Failed to send: ' + e.message);
-    }
-  }
-
-  _pollForResult() {
-    // Poll session state until agent finishes, then reload messages.
-    // This is the fallback when WS is not available.
-    if (this._polling) return;
-    this._polling = true;
-    this._pollCount = 0;
-    this.setStatus('running');
-    this._showActivity('', 'Working', 'waiting for response...');
-    const poll = async () => {
-      this._pollCount++;
-      try {
-        const r = await fetch(`/api/sessions/${this.sessionId}`, {credentials:'same-origin'});
-        if (!r.ok) { this._polling = false; this._removeActivity(); return; }
-        const data = await r.json();
-
-        // Update activity with poll count so user knows it's alive
-        const secs = this._pollCount * 2;
-        this._showActivity('', 'Working',
-          data.busy ? `running... (${secs}s)` : 'finishing...');
-
-        if (!data.busy) {
-          this._polling = false;
-          this._removeActivity();
-          this.setStatus('idle');
-          const msgs = data.messages || [];
-          const last = msgs[msgs.length - 1];
-          if (last && last.role === 'assistant') {
-            this._addAssistantBubble(last.content);
-            if (last.tool_calls) last.tool_calls.forEach(tc => {
-              this._addToolCard(tc.name, tc.inputs, tc.status, tc.result);
-            });
-          }
-          this.loadSessions();
-          // Try reconnecting WS now for future messages
-          if (this.sessionId && (!this.ws || this.ws.readyState !== 1)) {
-            this._connectWS(this.sessionId);
-          }
-          return;
-        }
-      } catch(e) { /* ignore */ }
-      if (this._polling) setTimeout(poll, 2000);
-    };
-    setTimeout(poll, 2000);
-  }
-
-  // ── WebSocket connection ────────────────────────────────────────
-
-  _connectWS(sid) {
-    this._disconnectWS();
-    this._wsRetries = (this._wsRetries || 0);
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${proto}//${location.host}/api/events`;
-    try {
-      this.ws = new WebSocket(url);
-    } catch(e) {
-      console.warn('[chat] WebSocket constructor failed:', e);
-      this.setStatus('no-ws');
-      return;
-    }
-    this._wsSessionId = sid;
-
-    this.ws.onopen = () => {
-      this._wsRetries = 0;
-      this.ws.send(JSON.stringify({session_id: sid}));
-      this.setStatus('connected');
-    };
-
-    this.ws.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        if (data.error) {
-          console.warn('[chat] WS server error:', data.error);
-          return;
-        }
-        this._handleEvent(data);
-      } catch(err) { console.error('[chat] ws parse:', err); }
-    };
-
-    this.ws.onclose = (ev) => {
-      console.log('[chat] WS closed, code:', ev.code, 'reason:', ev.reason);
-      if (ev.code === 1000) {
-        this.setStatus('idle');
-        return;
-      }
-      // Auto-reconnect with backoff (1s, 2s, 4s, max 10s)
-      if (this._wsSessionId && this.sessionId === this._wsSessionId) {
-        const delay = Math.min(1000 * Math.pow(2, this._wsRetries), 10000);
-        this._wsRetries++;
-        this.setStatus(this._wsRetries <= 2 ? 'connecting...' : 'reconnecting...');
-        setTimeout(() => {
-          if (this.sessionId === this._wsSessionId) {
-            this._connectWS(this._wsSessionId);
-          }
-        }, delay);
-      } else {
-        this.setStatus('idle');
-      }
-    };
-    this.ws.onerror = () => {};
-  }
-
-  _disconnectWS() {
-    if (this.ws) { try { this.ws.close(); } catch(e){} this.ws = null; }
-  }
-
-  _runSlashSSE(cmd) {
-    // Use fetch + ReadableStream to consume SSE events from POST /api/prompt.
-    // Server keeps the connection open and streams events as they happen.
-    const body = JSON.stringify({prompt: cmd, session_id: this.sessionId || ''});
-    fetch('/api/prompt', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'text/event-stream',
-      },
-      body,
-    }).then(response => {
-      if (!response.ok) {
-        this._removeActivity();
-        this._addError(`Server error (${response.status})`);
-        return;
-      }
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      const processChunk = ({done, value}) => {
-        if (done) {
-          this._removeActivity();
-          this.loadSessions();
-          return;
-        }
-        buffer += decoder.decode(value, {stream: true});
-        // Parse SSE lines
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';  // keep incomplete line
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const evt = JSON.parse(line.slice(6));
-              if (evt.type === 'session') {
-                if (!this.sessionId) {
-                  this.sessionId = evt.data.session_id;
-                  this.loadSessions();
-                }
-              } else if (evt.type === 'done') {
-                this._removeActivity();
-                this.loadSessions();
-              } else {
-                this._handleEvent(evt);
-              }
-            } catch(e) { /* skip bad JSON */ }
-          }
-        }
-        reader.read().then(processChunk);
-      };
-      reader.read().then(processChunk);
-    }).catch(err => {
-      this._removeActivity();
-      this._addError('Connection error: ' + err.message);
-    });
-  }
-
-  _ensureWS() {
-    // Wait up to 3s for WS to reach OPEN state.
-    // If WS is dead or missing, try reconnecting first.
-    return new Promise(resolve => {
-      // Already connected
-      if (this.ws && this.ws.readyState === 1) { resolve(); return; }
-      // Dead or missing — reconnect
-      if (!this.ws || this.ws.readyState >= 2) {
-        if (this.sessionId) this._connectWS(this.sessionId);
-      }
-      // Poll readyState
-      let elapsed = 0;
-      const iv = setInterval(() => {
-        elapsed += 50;
-        if (this.ws && this.ws.readyState === 1) {
-          clearInterval(iv); resolve(); return;
-        }
-        if (elapsed >= 3000) {
-          clearInterval(iv); resolve(); // give up, caller will POST fallback
-        }
-      }, 50);
-    });
-  }
-
-  // ── Event handling ──────────────────────────────────────────────
-
-  _handleEvent(evt) {
-    switch (evt.type) {
-      case 'text_chunk':
-        this._removeActivity();
-        if (!this._curMsgEl) this._startAssistantStream();
-        this._textBuf += evt.data.text;
-        this._renderStream();
-        break;
-
-      case 'thinking_chunk':
-        this._showActivity('thinking', 'Thinking', evt.data.text ? evt.data.text.slice(0,60) : '');
-        break;
-
-      case 'tool_start':
-        this._removeActivity();
-        this._addToolCard(evt.data.name, evt.data.inputs, 'running');
-        this._showActivity('tool-running', `Running ${evt.data.name}`, '');
-        break;
-
-      case 'tool_end':
-        this._removeActivity();
-        this._completeToolCard(evt.data.name, evt.data.result, evt.data.permitted);
-        break;
-
-      case 'permission_request':
-        this._removeActivity();
-        this._showApproval(evt.data.description);
-        break;
-
-      case 'permission_response':
-        this._resolveApproval(evt.data.granted);
-        break;
-
-      case 'turn_done':
-        this._removeActivity();
-        this._finishTurn(evt.data.input_tokens, evt.data.output_tokens);
-        break;
-
-      case 'status':
-        if (evt.data.state === 'running') {
-          this.setStatus('running');
-          this._showActivity('', 'Processing', '');
-        } else if (evt.data.state === 'idle') {
-          this._removeActivity();
-          this.setStatus('connected');
-          this.loadSessions();
-        }
-        break;
-
-      case 'command_result':
-        this._removeActivity();
-        this._addCommandResult(evt.data.command, evt.data.output);
-        break;
-
-      case 'interactive_menu':
-        this._removeActivity();
-        this._addInteractiveMenu(evt.data);
-        break;
-
-      case 'input_request':
-        this._removeActivity();
-        this._addInputRequest(evt.data);
-        break;
-
-      case 'error':
-        this._removeActivity();
-        this._addError(evt.data.message);
-        break;
-    }
-  }
-
-  // ── Rendering helpers ───────────────────────────────────────────
-
-  _clearChat() {
-    const el = document.getElementById('messages');
-    el.innerHTML = '<div style="flex:1"></div>';
-    this._curMsgEl = null; this._thinkEl = null; this._activityEl = null;
-    this._textBuf = ''; this._toolCards = {};
-    this._toolCounter = 0; this._approvalEl = null;
-    this._pendingApproval = false;
-  }
-
-  _addUserBubble(text) {
-    const el = document.createElement('div');
-    el.className = 'msg user';
-    el.innerHTML = `<div class="role-tag">You</div><div class="bubble"></div>`;
-    el.querySelector('.bubble').textContent = text;
-    document.getElementById('messages').appendChild(el);
-    this._scrollBottom();
-  }
-
-  _addAssistantBubble(content) {
-    const el = document.createElement('div');
-    el.className = 'msg assistant';
-    el.innerHTML = `<div class="role-tag">Assistant</div><div class="bubble"></div>`;
-    el.querySelector('.bubble').innerHTML = this._renderMd(content);
-    document.getElementById('messages').appendChild(el);
-    this._scrollBottom();
-  }
-
-  _startAssistantStream() {
-    this._removeActivity();
-    this._textBuf = '';
-    const el = document.createElement('div');
-    el.className = 'msg assistant';
-    el.innerHTML = `<div class="role-tag">Assistant</div><div class="bubble"></div>`;
-    document.getElementById('messages').appendChild(el);
-    this._curMsgEl = el.querySelector('.bubble');
-    this.streaming = true;
-  }
-
-  _renderStream() {
-    if (!this._curMsgEl) return;
-    if (!this._rafPending) {
-      this._rafPending = true;
-      requestAnimationFrame(() => {
-        this._rafPending = false;
-        if (this._curMsgEl) {
-          this._curMsgEl.innerHTML = this._renderMd(this._textBuf);
-          this._scrollBottom();
-        }
-      });
-    }
-  }
-
-  _renderMd(text) {
-    try {
-      // Sanitize: strip all raw HTML tags from the markdown source before
-      // rendering.  marked.parse() with {breaks:true} would otherwise
-      // preserve arbitrary <script>/<img onerror> etc. from model/tool output.
-      const clean = (text || '').replace(/<\/?[a-zA-Z][^>]*>/g, (tag) => {
-        return tag.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      });
-      return marked.parse(clean, {breaks:true});
-    }
-    catch(e) { return this._esc(text); }
-  }
-
-  _addToolCard(name, inputs, status, result) {
-    const id = 'tool-' + (this._toolCounter++);
-    const card = document.createElement('details');
-    card.className = 'tool-card' + (status==='done'?' done':'') + (status==='denied'?' denied':'');
-    card.id = id;
-    const inputStr = typeof inputs === 'string' ? inputs : JSON.stringify(inputs||{}, null, 2);
-    card.innerHTML = `
-      <summary>
-        ${status==='running'?'<div class="spinner"></div>':''}
-        <span class="tool-name">${this._esc(name)}</span>
-        <span class="tool-badge ${status}">${status}</span>
-      </summary>
-      <div class="tool-body">
-        <div class="label">Input</div>
-        <pre>${this._esc(inputStr)}</pre>
-        ${result ? `<div class="label">Output</div><pre>${this._esc(result)}</pre>` : ''}
-      </div>`;
-    document.getElementById('messages').appendChild(card);
-    this._toolCards[name + ':' + (this._toolCounter-1)] = card;
-    // Track last card for this tool name for completion matching
-    this._toolCards['__last__' + name] = card;
-    this._scrollBottom();
-  }
-
-  _completeToolCard(name, result, permitted) {
-    const card = this._toolCards['__last__' + name];
-    if (!card) return;
-    const status = permitted ? 'done' : 'denied';
-    card.className = 'tool-card ' + status;
-    const summary = card.querySelector('summary');
-    const spinner = summary.querySelector('.spinner');
-    if (spinner) spinner.remove();
-    const badge = summary.querySelector('.tool-badge');
-    badge.className = 'tool-badge ' + status;
-    badge.textContent = status;
-    if (result) {
-      const body = card.querySelector('.tool-body');
-      const existing = body.querySelectorAll('.label');
-      if (existing.length < 2) {
-        body.innerHTML += `<div class="label">Output</div><pre>${this._esc(result)}</pre>`;
-      }
-    }
-  }
-
-  _showApproval(description) {
-    const card = document.createElement('div');
-    card.className = 'approval-card';
-    card.innerHTML = `
-      <div class="ap-hdr">&#128274; Permission Required</div>
-      <div class="ap-desc">${this._esc(description)}</div>
-      <div class="ap-actions">
-        <button class="ap-btn allow" onclick="app.approve(true)">Allow</button>
-        <button class="ap-btn deny" onclick="app.approve(false)">Deny</button>
-      </div>`;
-    this._approvalEl = card;
-    this._pendingApproval = true;
-    document.getElementById('messages').appendChild(card);
-    this._scrollBottom();
-  }
-
-  _resolveApproval(granted) {
-    if (this._approvalEl) {
-      this._approvalEl.classList.add('resolved');
-      const badge = document.createElement('span');
-      badge.style.cssText = `font-size:11px;color:${granted?'var(--green)':'var(--red)'};margin-left:8px;`;
-      badge.textContent = granted ? '(allowed)' : '(denied)';
-      this._approvalEl.querySelector('.ap-hdr').appendChild(badge);
-      this._approvalEl = null;
-    }
-    this._pendingApproval = false;
-  }
-
-  approve(granted) {
-    if (!this._pendingApproval) return;
-    // Send via WS if available, else POST
-    if (this.ws && this.ws.readyState === 1) {
-      this.ws.send(JSON.stringify({type:'approve', granted}));
-    } else {
-      fetch('/api/approve', {
-        method:'POST', credentials:'same-origin',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({session_id: this.sessionId, granted})
-      }).catch(e => console.error('approve:', e));
-    }
-  }
-
-  _showActivity(type, label, detail) {
-    if (!this._activityEl) {
-      this._activityEl = document.createElement('div');
-      this._activityEl.className = 'activity-indicator';
-      this._activityEl.innerHTML = `
-        <div class="ai-spinner"></div>
-        <div class="ai-text">
-          <span class="ai-label"></span>
-          <span class="ai-dots"></span>
-          <span class="ai-detail"></span>
-        </div>
-        <div class="ai-progress"><div class="ai-fill"></div></div>`;
-      document.getElementById('messages').appendChild(this._activityEl);
-      this._scrollBottom();
-    }
-    // Update type/class
-    this._activityEl.className = 'activity-indicator' + (type ? ' ' + type : '');
-    this._activityEl.querySelector('.ai-label').textContent = label || 'Working';
-    const detailEl = this._activityEl.querySelector('.ai-detail');
-    if (detail) {
-      detailEl.textContent = detail;
-      detailEl.style.display = '';
-    } else {
-      detailEl.style.display = 'none';
-    }
-    this._scrollBottom();
-  }
-
-  _removeActivity() {
-    if (this._activityEl) {
-      this._activityEl.remove();
-      this._activityEl = null;
-    }
-    // Also remove legacy thinkEl if any
-    if (this._thinkEl) { this._thinkEl.remove(); this._thinkEl = null; }
-  }
-
-  _finishTurn(tokIn, tokOut) {
-    this._removeActivity();
-    this.streaming = false;
-    this._curMsgEl = null;
-    if (tokIn || tokOut) {
-      const meta = document.createElement('div');
-      meta.className = 'turn-meta';
-      meta.textContent = `${(tokIn||0).toLocaleString()} tokens in / ${(tokOut||0).toLocaleString()} tokens out`;
-      document.getElementById('messages').appendChild(meta);
-    }
-    this._scrollBottom();
-  }
-
-  _addInputRequest(data) {
-    const el = document.createElement('div');
-    el.className = 'msg assistant';
-    const uid = 'ir-' + Date.now();
-    el.innerHTML = `
-      <div class="role-tag" style="color:var(--accent)">Input Required</div>
-      <div style="background:var(--surface);border:1px solid var(--accent);border-radius:var(--radius-sm);
-        padding:12px 14px;max-width:min(500px,90%);">
-        <div style="font-size:13px;color:var(--text);margin-bottom:8px;">${this._esc(data.prompt)}</div>
-        <div style="display:flex;gap:6px;">
-          <input id="${uid}" type="text" placeholder="${this._esc(data.placeholder || '')}"
-            style="flex:1;background:var(--panel);border:1px solid var(--border);color:var(--text);
-            border-radius:var(--radius-sm);padding:6px 10px;font-size:13px;font-family:var(--font);outline:none;"
-            onkeydown="if(event.key==='Enter'){document.getElementById('${uid}-go').click()}">
-          <button id="${uid}-go" style="background:var(--accent);color:#000;border:none;padding:6px 14px;
-            border-radius:var(--radius-sm);font-weight:600;font-size:12px;cursor:pointer;"
-            onclick="(function(){
-              var v=document.getElementById('${uid}').value.trim();
-              var cmd='${data.command}' + (v ? ' ' + v : ' general project improvement');
-              document.getElementById('prompt-input').value=cmd;
-              app.send();
-              this.parentElement.parentElement.style.opacity='0.5';
-              this.parentElement.parentElement.style.pointerEvents='none';
-            }).call(this)">Go</button>
-        </div>
-      </div>`;
-    document.getElementById('messages').appendChild(el);
-    this._scrollBottom();
-    // Auto-focus the input
-    setTimeout(() => { const inp = document.getElementById(uid); if(inp) inp.focus(); }, 100);
-  }
-
-  _addInteractiveMenu(data) {
-    const icons = {bulb:'&#128161;',clipboard:'&#128203;',worker:'&#128119;',brain:'&#129504;',
-      sparkle:'&#10024;',search:'&#128270;',book:'&#128214;',chat:'&#128172;',test:'&#129514;',
-      note:'&#128221;',monitor:'&#128225;',robot:'&#129302;'};
-    const el = document.createElement('div');
-    el.className = 'msg assistant';
-    const items = (data.items || []).map(it =>
-      `<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;
-        border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface);
-        transition:background .15s;"
-        onmouseenter="this.style.background='var(--panel)'"
-        onmouseleave="this.style.background='var(--surface)'"
-        onclick="document.getElementById('prompt-input').value='${it.cmd}';app.send()">
-        <span style="font-size:16px;">${icons[it.icon]||'&#9654;'}</span>
-        <div>
-          <div style="font-size:12px;font-weight:600;color:var(--text);">${this._esc(it.label)}</div>
-          <div style="font-size:10px;font-family:var(--mono);color:var(--text-muted);">${this._esc(it.cmd)}</div>
-        </div>
-      </div>`).join('');
-    el.innerHTML = `<div class="role-tag" style="color:var(--accent)">SSJ Developer Mode</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;max-width:min(640px,95%);
-        margin-top:6px;">${items}</div>`;
-    document.getElementById('messages').appendChild(el);
-    this._scrollBottom();
-  }
-
-  _addCommandResult(command, output) {
-    const el = document.createElement('div');
-    el.className = 'msg assistant';
-    el.innerHTML = `<div class="role-tag" style="color:var(--accent)">System</div>
-      <div class="bubble" style="background:var(--surface);border:1px solid var(--border);
-        border-left:3px solid var(--accent);border-radius:var(--radius-sm);padding:12px 14px;">
-        <div style="font-family:var(--mono);font-size:11px;color:var(--accent);margin-bottom:6px;">${this._esc(command)}</div>
-        <pre style="white-space:pre-wrap;font-family:var(--mono);font-size:12px;color:var(--text-dim);
-          margin:0;background:none;border:none;padding:0;line-height:1.5;">${this._esc(output)}</pre>
-      </div>`;
-    document.getElementById('messages').appendChild(el);
-    this._scrollBottom();
-  }
-
-  _addError(msg) {
-    const el = document.createElement('div');
-    el.style.cssText = 'color:var(--red);font-size:13px;padding:8px 12px;background:var(--red-dim);border-radius:var(--radius-sm);margin:8px 0;max-width:min(640px,90%)';
-    el.textContent = msg;
-    document.getElementById('messages').appendChild(el);
-    this._scrollBottom();
-  }
-
-  _showWelcome() {
-    const el = document.getElementById('messages');
-    el.innerHTML = '<div style="flex:1"></div>';
-    const dash = document.createElement('div');
-    dash.style.cssText = 'max-width:680px;margin:0 auto;padding:20px 0;';
-    dash.innerHTML = `
-      <div style="text-align:center;margin-bottom:20px;">
-        <div style="font-size:28px;font-weight:700;color:var(--accent);margin-bottom:4px;">CheetahClaws</div>
-        <div style="font-size:13px;color:var(--text-muted);">AI Coding Assistant &bull; 11 Providers &bull; 60+ Tools</div>
-      </div>
-
-      ${this._dashSection('Core', [
-        this._dashCard('Write Code',    'Generate, edit, debug any language',     'Help me write a Python web scraper',  'var(--blue)'),
-        this._dashCard('Read & Search', 'Glob, Grep, Read files intelligently',   'Find all TODO comments in this repo', 'var(--green)'),
-        this._dashCard('Terminal',      'Run shell commands with safety checks',   'Show git log --oneline -10',          'var(--accent)'),
-        this._dashCard('Analyze',       'Understand codebases, explain logic',     'Explain the architecture of this project', 'var(--purple)'),
-      ])}
-
-      ${this._dashSection('Agent Features', [
-        this._dashCmd('/plan',       'Plan Mode',       'Read-only analysis, then implement step by step',  'var(--blue)'),
-        this._dashCmd('/brainstorm', 'Brainstorm',      'Multi-persona debate with synthesis & auto-tasks', 'var(--purple)'),
-        this._dashCmd('/worker',     'Auto Worker',     'Batch-implement pending tasks automatically',      'var(--green)'),
-        this._dashCmd('/agent',      'Autonomous Agent', 'Self-directed agent loop with templates',         'var(--accent)'),
-      ])}
-
-      ${this._dashSection('Session & Memory', [
-        this._dashCmd('/memory',     'Memory',      'Persistent context recalled across sessions',  'var(--blue)'),
-        this._dashCmd('/checkpoint', 'Checkpoints', 'Snapshot & rewind file changes',               'var(--green)'),
-        this._dashCmd('/save',       'Save/Load',   'Export and resume conversation sessions',      'var(--text-dim)'),
-        this._dashCmd('/cloudsave',  'Cloud Sync',  'Encrypted backup to GitHub Gist',              'var(--purple)'),
-      ])}
-
-      ${this._dashSection('Multi-Model', [
-        this._dashCmd('/model',    'Switch Model', 'Claude, GPT, Gemini, Ollama, DeepSeek, Qwen...', 'var(--accent)'),
-        this._dashCmd('/thinking', 'Thinking',     'Extended reasoning for complex problems',         'var(--blue)'),
-        this._dashCmd('/compact',  'Compact',      'Compress context when window is full',            'var(--green)'),
-        this._dashCmd('/config',   'Config',       'View and modify all runtime settings',            'var(--text-dim)'),
-      ])}
-
-      ${this._dashSection('Development Tools', [
-        this._dashCmd('/ssj',     'SSJ Mode',     'Integrated developer dashboard with power menu',  'var(--red)'),
-        this._dashCmd('/tasks',   'Task Manager', 'Create, track, complete development tasks',       'var(--accent)'),
-        this._dashCmd('/init',    'Init Project', 'Generate CLAUDE.md for your codebase',            'var(--blue)'),
-        this._dashCmd('/export',  'Export',       'Export conversation to Markdown file',             'var(--text-dim)'),
-      ])}
-
-      ${this._dashSection('Bridges & Media', [
-        this._dashCmd('/telegram', 'Telegram',   'Chat via Telegram bot bridge',         'var(--blue)'),
-        this._dashCmd('/slack',    'Slack',       'Chat via Slack workspace integration', 'var(--purple)'),
-        this._dashCmd('/voice',    'Voice Input', 'Speak to code with STT transcription', 'var(--green)'),
-        this._dashCmd('/image',    'Vision',      'Analyze screenshots and UI designs',   'var(--accent)'),
-      ])}
-
-      <div style="border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);padding:12px 14px;margin-top:12px;">
-        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:8px;">Quick Status</div>
-        <div style="display:flex;flex-wrap:wrap;gap:6px;">
-          ${['/status','/context','/cost','/permissions','/doctor','/skills','/help']
-            .map(c => this._cmdChip(c)).join('')}
-        </div>
-      </div>
-      <div style="text-align:center;margin-top:10px;font-size:11px;color:var(--text-muted);">
-        &#9881; Settings for model, API keys, permissions &bull; &#9790; Toggle dark/light theme
-      </div>`;
-    el.appendChild(dash);
-  }
-
-  _dashSection(title, cards) {
-    return `<div style="margin-bottom:12px;">
-      <div style="font-size:11px;text-transform:uppercase;letter-spacing:.6px;
-        color:var(--text-muted);margin-bottom:6px;padding-left:2px;">${title}</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">${cards.join('')}</div>
-    </div>`;
-  }
-
-  _dashCard(title, desc, example, color) {
-    return `<div style="background:var(--surface);border:1px solid var(--border);
-      border-radius:var(--radius-sm);padding:10px 12px;cursor:pointer;
-      border-left:3px solid ${color};transition:background .15s;"
-      onmouseenter="this.style.background='var(--panel)'"
-      onmouseleave="this.style.background='var(--surface)'"
-      onclick="document.getElementById('prompt-input').value='${example}';document.getElementById('prompt-input').focus();">
-      <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:2px;">${title}</div>
-      <div style="font-size:11px;color:var(--text-muted);line-height:1.4;">${desc}</div>
-    </div>`;
-  }
-
-  _dashCmd(cmd, title, desc, color) {
-    return `<div style="background:var(--surface);border:1px solid var(--border);
-      border-radius:var(--radius-sm);padding:10px 12px;cursor:pointer;
-      border-left:3px solid ${color};transition:background .15s;"
-      onmouseenter="this.style.background='var(--panel)'"
-      onmouseleave="this.style.background='var(--surface)'"
-      onclick="document.getElementById('prompt-input').value='${cmd}';app.send()">
-      <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px;">
-        <span style="font-family:var(--mono);font-size:11px;color:${color};font-weight:600;">${cmd}</span>
-        <span style="font-size:12px;font-weight:600;color:var(--text);">${title}</span>
-      </div>
-      <div style="font-size:11px;color:var(--text-muted);line-height:1.4;">${desc}</div>
-    </div>`;
-  }
-
-  _cmdChip(cmd) {
-    return `<span style="font-family:var(--mono);font-size:11px;padding:3px 8px;
-      background:var(--panel);border:1px solid var(--border);border-radius:4px;
-      cursor:pointer;color:var(--text-dim);transition:border-color .15s;"
-      onmouseenter="this.style.borderColor='var(--accent)'"
-      onmouseleave="this.style.borderColor='var(--border)'"
-      onclick="document.getElementById('prompt-input').value='${cmd}';app.send()">${cmd}</span>`;
-  }
-
-  _scrollBottom() {
-    const el = document.getElementById('messages');
-    requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
-  }
-
-  _esc(s) {
-    const d = document.createElement('div');
-    d.textContent = s || '';
-    return d.innerHTML;
-  }
-
-  setStatus(state) {
-    const dot = document.getElementById('status-dot');
-    const txt = document.getElementById('status-text');
-    dot.className = 'dot' + (state==='disconnected'?' off':'') + (state==='running'?' busy':'');
-    txt.textContent = state;
-  }
-
-  // ── Theme ───────────────────────────────────────────────────────
-
-  initTheme() {
-    const saved = localStorage.getItem('cc-theme') || 'dark';
-    this._applyTheme(saved);
-  }
-
-  toggleTheme() {
-    const current = document.documentElement.getAttribute('data-theme') || 'dark';
-    const next = current === 'dark' ? 'light' : 'dark';
-    this._applyTheme(next);
-    localStorage.setItem('cc-theme', next);
-  }
-
-  _applyTheme(theme) {
-    document.documentElement.setAttribute('data-theme', theme);
-    const btn = document.getElementById('theme-btn');
-    if (btn) btn.textContent = theme === 'dark' ? '\u263E' : '\u2600';
-  }
-
-  // ── Settings panel ──────────────────────────────────────────────
-
-  toggleSettings() {
-    const panel = document.getElementById('settings-panel');
-    const isOpen = panel.classList.contains('open');
-    if (isOpen) {
-      panel.classList.remove('open');
-    } else {
-      panel.classList.add('open');
-      this._loadSettings();
-    }
-  }
-
-  async _loadSettings() {
-    // Load config for current session
-    if (this.sessionId) {
-      try {
-        const r = await this._fetchAuth(`/api/config?sid=${this.sessionId}`);
-        const cfg = await r.json();
-        this._renderConfig(cfg);
-      } catch(e) { console.error('loadSettings:', e); }
-    }
-    // Load available models
-    try {
-      const r = await this._fetchAuth('/api/models');
-      const data = await r.json();
-      this._renderModels(data.providers || []);
-    } catch(e) { console.error('loadModels:', e); }
-  }
-
-  _renderConfig(cfg) {
-    // Current model
-    document.getElementById('sp-current-model').textContent = cfg.model || '(not set)';
-    // Permission mode
-    const permSel = document.getElementById('sp-permission');
-    permSel.value = cfg.permission_mode || 'auto';
-    // Toggles
-    document.getElementById('sp-thinking').className =
-      'sp-toggle' + (cfg.thinking ? ' on' : '');
-    document.getElementById('sp-verbose').className =
-      'sp-toggle' + (cfg.verbose ? ' on' : '');
-    // Numeric fields
-    document.getElementById('sp-max-tokens').value = cfg.max_tokens || 40000;
-    document.getElementById('sp-thinking-budget').value = cfg.thinking_budget || 10000;
-    // API keys status
-    const keysEl = document.getElementById('sp-api-keys');
-    const configured = cfg.api_keys_configured || {};
-    const providers = ['anthropic','openai','gemini','deepseek','ollama',
-                       'qwen','kimi','zhipu','minimax','custom'];
-    keysEl.innerHTML = providers.map(p => {
-      const has = configured[p] || p === 'ollama' || p === 'lmstudio';
-      return `<div class="sp-key-row">
-        <span class="key-dot ${has?'ok':'missing'}"></span>
-        <span class="provider-name">${p}</span>
-        ${p!=='ollama'&&p!=='lmstudio'
-          ? `<input class="sp-input" type="password" placeholder="${has?'(configured)':'API key...'}"
-              onchange="app.setApiKey('${p}', this.value)">`
-          : `<span style="font-size:11px;color:var(--text-muted)">no key needed</span>`}
-      </div>`;
-    }).join('');
-  }
-
-  _renderModels(providers) {
-    const listEl = document.getElementById('sp-model-list');
-    const currentModel = document.getElementById('sp-current-model').textContent;
-    listEl.innerHTML = providers.map(p => {
-      if (!p.models.length && p.provider !== 'ollama') return '';
-      const models = p.models.map(m => {
-        const full = `${p.provider}/${m}`;
-        const isActive = currentModel === full || currentModel === m;
-        return `<div class="sp-model-item${isActive?' active':''}"
-          onclick="app.selectModel('${full}')">${m}</div>`;
-      }).join('');
-      return `<details class="sp-model-group">
-        <summary>${p.provider} (${p.models.length})
-          ${!p.has_api_key && p.needs_api_key
-            ? '<span style="color:var(--red);font-size:10px"> no key</span>':''}
-        </summary>
-        ${models}
-      </details>`;
-    }).join('');
-  }
-
-  async selectModel(model) {
-    await this.updateConfig('model', model);
-    document.getElementById('sp-current-model').textContent = model;
-    // Re-render model list to update active state
-    document.querySelectorAll('.sp-model-item').forEach(el => {
-      el.classList.toggle('active', el.textContent.trim() === model.split('/').pop());
-    });
-  }
-
-  async toggleConfig(key) {
-    const el = document.getElementById('sp-' + key);
-    const isOn = el.classList.contains('on');
-    await this.updateConfig(key, !isOn);
-    el.classList.toggle('on');
-  }
-
-  async updateConfig(key, value) {
-    if (!this.sessionId) return;
-    try {
-      await this._fetchAuth('/api/config', {
-        method: 'PATCH',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({session_id: this.sessionId, config: {[key]: value}})
-      });
-    } catch(e) { console.error('updateConfig:', e); }
-  }
-
-  async setApiKey(provider, value) {
-    if (!value || !this.sessionId) return;
-    const keyMap = {
-      anthropic:'anthropic_api_key', openai:'openai_api_key',
-      gemini:'gemini_api_key', kimi:'kimi_api_key', qwen:'qwen_api_key',
-      zhipu:'zhipu_api_key', deepseek:'deepseek_api_key',
-      minimax:'minimax_api_key', custom:'custom_api_key',
-    };
-    await this.updateConfig(keyMap[provider], value);
-    // Update the dot indicator
-    const row = document.querySelector(`.sp-key-row .provider-name`);
-    // Reload settings to reflect change
-    this._loadSettings();
-  }
-
-  sendSlash(cmd) {
-    // Send a slash command as a regular prompt
-    const input = document.getElementById('prompt-input');
-    input.value = cmd;
-    this.send();
-    this.toggleSettings();
-  }
-}
-
-// ── Init ──────────────────────────────────────────────────────────────────
-
-const app = new ChatApp();
-app.initTheme();
-app.loadSessions();
-app._showWelcome();
-
-// Input handling
-const promptInput = document.getElementById('prompt-input');
-promptInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    app.send();
-  }
-});
-promptInput.addEventListener('input', () => {
-  promptInput.style.height = 'auto';
-  promptInput.style.height = Math.min(promptInput.scrollHeight, 200) + 'px';
-});
-
-// Close sidebar on mobile when clicking outside
-document.getElementById('main').addEventListener('click', () => {
-  document.getElementById('sidebar').classList.remove('open');
-});
-</script>
 </body>
 </html>

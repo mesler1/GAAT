@@ -1,304 +1,340 @@
 # Web UI Guide
 
-CheetahClaws includes a built-in web interface that runs entirely from the Python stdlib — no Node.js, no React, no external dependencies. Start it with `--web` and open your browser.
+CheetahClaws ships with a production-ready browser UI built on a pure Python stdlib HTTP server plus nine small vanilla-JS modules — no Node.js, no bundler, no build step. This guide covers installation, accounts, the Chat UI, the PTY terminal, the full HTTP API, observability, and how the pieces fit together.
 
-## Quick Start
+---
+
+## Install and launch
 
 ```bash
-cheetahclaws --web                          # localhost:8080
-cheetahclaws --web --port 8008              # custom port
-cheetahclaws --web --no-auth                # no password (local only)
-cheetahclaws --web --host 0.0.0.0           # accessible from network
+# Install the web extras (SQLAlchemy, passlib[bcrypt], PyJWT):
+pip install 'cheetahclaws[web]'
+
+# Launch (auto-picks a free port if 8080 is taken):
+cheetahclaws --web
+
+# Explicit port / host / no-auth:
+cheetahclaws --web --port 9000
+cheetahclaws --web --host 0.0.0.0             # open to the local network
+cheetahclaws --web --no-auth                  # localhost dev only — skips login
 ```
 
-The server prints a random password on startup:
+Startup banner:
 
 ```
   CheetahClaws Web Terminal
   ────────────────────────────────────────
   Terminal: http://localhost:8080
   Chat UI:  http://localhost:8080/chat
-  Password: aBcDeF
+  Terminal pwd: e_7rJ4  (for / index page only)
+  Chat UI:  first visit will prompt you to register an admin account
   ────────────────────────────────────────
   Press Ctrl+C to stop
 ```
 
-## Two Interfaces
+Open the Chat UI URL and you'll see a **Create your first account** form on the very first visit (`/api/auth/bootstrap` reports `has_users: false`); after that it switches to **Sign in**. The **first registered user is marked admin**.
 
-### Chat UI — `http://localhost:8080/chat`
+The leaping-cheetah favicon is served at `/favicon.ico` (root) and `/static/favicon.png`.
 
-A rich, structured chat interface. Messages, tool calls, and approval requests are rendered as separate UI components — not raw terminal text.
+---
 
-**Layout:**
-- **Left sidebar** — session list, "+" New button
-- **Center** — chat messages, tool cards, approval cards, activity indicator
-- **Top bar** — status dot, theme toggle (☾/☀), settings gear (⚙)
+## Accounts and authentication
 
-**Features:**
+Two completely separate auth flows run side-by-side on the same port:
 
-| Feature | How It Works |
-|---------|-------------|
-| Streaming text | Assistant responses stream word-by-word via Server-Sent Events |
-| Tool cards | Each tool call gets a collapsible card showing name, inputs, outputs, and status badge (running/done/denied) |
-| Permission cards | When the agent needs approval, an Allow/Deny card appears inline |
-| Activity indicator | Spinner + label shows current state: "Processing...", "Thinking...", "Running Bash...", etc. |
-| Slash commands | All 45+ commands work. Quick commands (`/status`, `/help`) return results instantly. Long-running commands (`/brainstorm`, `/worker`) stream events in real-time via SSE |
-| SSJ Mode | `/ssj` shows a clickable 12-item menu. Sub-commands like `/ssj debate` and `/ssj commit` run directly without the menu |
-| Brainstorm | `/brainstorm` asks for a topic first (with input box), then streams the multi-agent debate. `/brainstorm <topic>` starts immediately |
-| Settings panel | Change model, toggle thinking/verbose, set API keys, run quick commands |
-| Dark/Light theme | Click ☾/☀ in the top bar. Choice persisted in localStorage |
-| Feature dashboard | Welcome screen shows 24 features in 6 categories with clickable cards |
-| Mobile responsive | Sidebar becomes an overlay on small screens |
+| Page | Auth | Cookie | Created |
+|------|------|--------|---------|
+| `/chat` (Chat UI) | `username + password` → bcrypt verify → **JWT** | `ccjwt` | Users register themselves |
+| `/` (PTY terminal) | One-time generated password | `cctoken` | Printed on startup |
 
-### PTY Terminal — `http://localhost:8080/`
-
-A full xterm.js terminal emulator in the browser — identical to using CheetahClaws in a native terminal. 100% feature parity.
-
-- WebSocket transport with automatic SSE fallback (works through VS Code port forwarding)
-- xterm.js v5.5 with fit addon, web-links addon, 256-color ANSI support
-- Auto-resize on window change
-
-## Authentication
-
-By default, the server generates a random 6-character password displayed on startup. Enter it in the login form to get a session cookie.
+Chat-UI auth endpoints:
 
 ```
-Password: aBcDeF
+GET  /api/auth/bootstrap   →  { has_users, no_auth }
+POST /api/auth/register    →  { username, password }  (first user becomes admin)
+POST /api/auth/login       →  { username, password }
+POST /api/auth/logout      →  clears ccjwt
+GET  /api/auth/whoami      →  { user: { id, username, is_admin, created_at } }
 ```
 
-- Cookie: `cctoken`, `HttpOnly`, `SameSite=Strict`, `Path=/`, 24h expiry
-- `--no-auth` disables the password entirely (suitable for localhost only)
-- API endpoints return `401 Unauthorized` without a valid cookie
-- Static pages (`/chat`, `/`) are served without auth; API calls require it
+- Password hashing: **passlib + bcrypt**.
+- JWT: **PyJWT**, HS256, **7-day TTL**. Signing secret is generated once and persisted to `~/.cheetahclaws/web_secret` (0600), so logins survive server restarts. Override with `CHEETAHCLAWS_WEB_SECRET` env var.
+- Cookie: `ccjwt=<jwt>; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800`.
+- `--no-auth` short-circuits auth to a synthetic single-user `user_id=1` for localhost testing.
 
-## Settings Panel
+Every other `/api/*` route requires a valid `ccjwt` cookie → `401 { "error": "auth required" }` otherwise.
 
-Click the ⚙ gear icon in the top bar to open the settings panel.
+---
 
-### Model Selection
+## Persistence
 
-Browse models grouped by provider (Anthropic, OpenAI, Gemini, Ollama, DeepSeek, etc.). Click any model to switch. The current model is highlighted.
+All session metadata and message history live in SQLite, not RAM. Server restarts do **not** lose anything.
 
-Providers that need an API key but don't have one configured show a red "no key" badge.
+- **DB file:** `~/.cheetahclaws/web.db` (0600). Override with `CHEETAHCLAWS_WEB_DB`.
+- **Four tables** (SQLAlchemy 2.x, declared in `web/models.py`):
 
-### Behavior
+| Table | Columns | Notes |
+|-------|---------|-------|
+| `users` | `id`, `username`, `password_hash`, `is_admin`, `created_at` | Username unique + indexed |
+| `chat_sessions` | `id` (12-hex pk), `user_id` (fk), `title`, `created_at`, `last_active`, `config_json` | `last_active` indexed |
+| `messages` | `id`, `session_id` (fk, cascade), `role`, `content`, `tool_calls_json`, `created_at` | |
+| `api_credentials` | `id`, `user_id` (fk), `provider`, `api_key`, unique(user_id, provider) | Future: encrypt at rest |
 
-| Setting | Options | Description |
-|---------|---------|-------------|
-| Permission Mode | auto / accept-all / manual | How tool calls are approved |
-| Thinking | on/off | Enable extended thinking (Claude) |
-| Verbose | on/off | Show token counts |
-| Max Tokens | number | Maximum output tokens |
-| Thinking Budget | number | Token budget for thinking |
+Schema is bootstrapped on first run via `Base.metadata.create_all`. No Alembic yet — if you change models, drop the DB (or migrate by hand) and restart.
 
-### API Keys
+### Session lifecycle
 
-Each provider shows a green dot (configured) or gray dot (not configured). Enter a key to set it for the current session. Keys are not persisted to disk — use environment variables for permanent storage.
+1. User submits a prompt with no `session_id` → server creates a row in `chat_sessions` (title `"New chat"`) + starts an in-memory `ChatSession`.
+2. First user message auto-titles the session (up to 60 chars of the first line).
+3. Every assistant + user message is persisted to `messages` via a write-through cache.
+4. On restart, the in-memory cache is empty. When the UI asks for a session the server **hydrates from DB**: loads the row, re-reads messages, re-creates the agent state.
+5. Cross-user isolation: both `repo.get_session(id, user_id)` (DB) and `get_chat_session(id, user_id, ...)` (in-memory cache hit) enforce ownership — a user can never see another user's session, even if they guess the id.
 
-### Quick Actions
+---
 
-Buttons for common commands: `Compact Context`, `Status`, `Context Usage`, `Cost`.
+## The Chat UI (`/chat`)
 
-### Advanced
+The thin `chat.html` (~550 lines of HTML + CSS) loads nine small JS modules in order:
 
-- **Open Terminal** — opens the PTY terminal in a new tab
-- **Health Check** — runs `/doctor`
-- **Help** — runs `/help`
-
-## API Reference
-
-All endpoints require authentication (cookie or `--no-auth` mode).
-
-### `POST /api/prompt`
-
-Submit a prompt or slash command.
-
-**Request:**
-```json
-{
-  "prompt": "/brainstorm improve testing",
-  "session_id": "abc123"        // omit to create new session
-}
+```
+web/static/js/chat.js       — ChatApp class, constructor, send(), WS, SSE, event dispatch
+web/static/js/util.js       — _escapeHtml, _fmtRelTime, _renderMd (with XSS strip), _scrollBottom
+web/static/js/auth.js       — bootstrap, doAuth, whoami, logout, _fetchAuth
+web/static/js/sidebar.js    — loadSessions, _renderSessionList, _showSessMenu, rename/delete/export/new/switch
+web/static/js/tools.js      — _addToolCard, _completeToolCard, activity indicator, input requests, menus
+web/static/js/approval.js   — _showApproval / _resolveApproval / approve(granted)
+web/static/js/settings.js   — theme, toggleSettings, _renderModels, updateConfig, setApiKey
+web/static/js/welcome.js    — dashboard cards (Core / Agent / Session / Multi-Model / Dev / Bridges / Media)
+web/static/js/init.js       — instantiates `app = new ChatApp()`, wires input handlers
 ```
 
-**Response (quick command):**
-```json
-{
-  "session_id": "abc123",
-  "events": [
-    {"type": "command_result", "data": {"command": "/status", "output": "..."}}
-  ]
-}
+Every module except `chat.js` and `init.js` extends the prototype:
+
+```js
+Object.assign(ChatApp.prototype, { method1, method2, ... });
 ```
 
-**Response (long-running, with `Accept: text/event-stream`):**
-Server keeps the connection open and streams SSE:
-```
-data: {"type":"session","data":{"session_id":"abc123"}}
-data: {"type":"status","data":{"state":"running"}}
-data: {"type":"text_chunk","data":{"text":"Generating personas..."}}
-data: {"type":"text_chunk","data":{"text":"Agent 1 thinking..."}}
-...
-data: {"type":"status","data":{"state":"idle"}}
-data: {"type":"done"}
-```
+This way `app.foo()` call sites don't change when methods move files, and there's no bundler.
 
-### `WS /api/events`
+### Layout
 
-WebSocket connection for real-time event streaming.
+- **Left sidebar** — session list (title + relative time + message count + busy dot), search box (client-side filter), `+ New` button, footer with current username + Sign out.
+- **Center** — scrollable chat area with user bubbles, assistant bubbles (Markdown rendered via `marked.js` with `<tag>` stripping for XSS), tool cards, approval cards, activity indicator.
+- **Top bar** — status dot, theme toggle (☀/☾), settings gear (⚙).
 
-**Connect:** `ws://localhost:8080/api/events` (browser sends cookie automatically)
+### Session management
 
-**First frame (client → server):**
-```json
-{"session_id": "abc123"}
-```
+| Action | UI | API |
+|--------|-----|-----|
+| List | Sidebar auto-loads | `GET /api/sessions` |
+| Switch | Click a session | `GET /api/sessions/{id}` (replays messages) |
+| New | `+ New` button | `POST /api/prompt` with empty `session_id` |
+| Rename | Right-click → Rename | `PATCH /api/sessions/{id}` `{ "title": "..." }` |
+| Delete | Right-click → Delete | `DELETE /api/sessions/{id}` |
+| Export | Right-click → Export Markdown | `GET /api/sessions/{id}/export` (downloads `chat-<id>.md`) |
+| Search | Search box | Client-side over `_sessions` array (title + id) |
 
-**Subsequent frames (client → server):**
-```json
-{"type": "prompt", "prompt": "hello"}
-{"type": "approve", "granted": true}
-```
+### Theme (light / dark / system)
 
-**Events (server → client):**
-```json
-{"type": "text_chunk", "data": {"text": "Hello!"}, "ts": 1234567890.0}
-{"type": "tool_start", "data": {"name": "Bash", "inputs": {"command": "ls"}}}
-{"type": "tool_end", "data": {"name": "Bash", "result": "...", "permitted": true}}
-{"type": "permission_request", "data": {"description": "Write to file.txt"}}
-{"type": "turn_done", "data": {"input_tokens": 1234, "output_tokens": 567}}
-{"type": "status", "data": {"state": "running"}}
-{"type": "status", "data": {"state": "idle"}}
-{"type": "command_result", "data": {"command": "/status", "output": "..."}}
-{"type": "interactive_menu", "data": {"menu": "ssj", "items": [...]}}
-{"type": "input_request", "data": {"prompt": "...", "command": "/brainstorm"}}
-{"type": "error", "data": {"message": "..."}}
-```
+Light is the default; when no explicit choice is stored, CSS media query `@media (prefers-color-scheme: dark)` swaps in the dark palette automatically. The toggle button **cycles** `system → light → dark → system ...`:
 
-### `POST /api/approve`
+- `localStorage.cc-theme == null` → no `data-theme` attribute → CSS picks based on OS.
+- `localStorage.cc-theme == 'light'` or `'dark'` → `data-theme` attribute forces that theme regardless of OS.
 
-Respond to a pending permission request.
+An inline `<script>` in `<head>` applies the stored theme before first paint to avoid a flash of the wrong theme on load.
 
-```json
-{"session_id": "abc123", "granted": true}
-```
+### Tool cards, permissions, activity
 
-### `GET /api/sessions`
+Streaming events from the agent are rendered as distinct UI components, not raw text. See the WebSocket events table below.
 
-List all chat sessions.
+---
 
-```json
-{
-  "sessions": [
-    {"id": "abc123", "created_at": 1234.5, "last_active": 1234.5,
-     "busy": false, "message_count": 10}
-  ]
-}
-```
+## PTY terminal (`/`)
 
-### `GET /api/sessions/{id}`
+A full xterm.js (v5.5) terminal emulator in the browser — identical to running `cheetahclaws` in a native shell. 100% feature parity.
 
-Get session details with full message history.
+- WebSocket transport with automatic SSE fallback (works through VS Code port forwarding and other proxies that break `Upgrade: websocket`).
+- Fit addon + web-links addon + 256-color ANSI.
+- Gated by the one-time generated password (the `Terminal pwd:` line in the startup banner). **This is a completely different auth system from the Chat UI.**
 
-```json
-{
-  "id": "abc123",
-  "messages": [
-    {"role": "user", "content": "hello"},
-    {"role": "assistant", "content": "Hi! How can I help?", "tool_calls": [...]}
-  ],
-  "config": {"model": "anthropic/claude-sonnet-4-6", ...},
-  "busy": false
-}
-```
+---
 
-### `GET/PATCH /api/config`
+## HTTP API reference
 
-Read or update session configuration.
+All `/api/*` routes other than `/api/auth/*` and the ops endpoints require a valid `ccjwt` cookie. Ops endpoints (`/health`, `/metrics`) are unauthenticated so Prometheus / k8s probes can hit them.
 
-**GET:** `GET /api/config?sid=abc123`
+### Auth
 
-**PATCH:**
-```json
-{"session_id": "abc123", "config": {"model": "openai/gpt-4o", "thinking": true}}
-```
+| Route | Method | Body | Response |
+|-------|--------|------|----------|
+| `/api/auth/bootstrap` | GET | — | `{"has_users": bool, "no_auth": bool}` |
+| `/api/auth/register` | POST | `{username, password}` | `{ok:true, user}` + `Set-Cookie: ccjwt=...` (first user is admin; username ≥ 2 chars, password ≥ 6) |
+| `/api/auth/login` | POST | `{username, password}` | `{ok:true, user}` + cookie, or `401 {"error":"invalid credentials"}` |
+| `/api/auth/logout` | POST | — | `{ok:true}` + `Set-Cookie: ccjwt=; Max-Age=0` |
+| `/api/auth/whoami` | GET | — | `{user: {id, username, is_admin, created_at}}` or `401` |
 
-Writable keys: `model`, `permission_mode`, `verbose`, `thinking`, `thinking_budget`, `max_tokens`, plus API keys (session-only, not persisted).
+### Chat
 
-### `GET /api/models`
+| Route | Method | Purpose |
+|-------|--------|---------|
+| `/api/prompt` | POST | Submit a prompt or slash command. If the body's `prompt` starts with `/` and the request has `Accept: text/event-stream`, the server keeps the connection open and streams SSE events until the command finishes. Otherwise returns `{session_id, events}` inline. |
+| `/api/events` | WS | Real-time structured event stream for a session. First client frame: `{"session_id": "..."}`. Server streams `text_chunk`, `tool_start`, `tool_end`, `permission_request`, `turn_done`, etc. |
+| `/api/approve` | POST | Respond to a `permission_request`. Body: `{session_id, granted: bool}`. |
 
-List all providers and available models.
+### Sessions
+
+| Route | Method | Purpose |
+|-------|--------|---------|
+| `/api/sessions` | GET | `{sessions: [{id, title, created_at, last_active, message_count, busy}, ...]}` — this user only |
+| `/api/sessions/{id}` | GET | `{id, title, messages, config, busy}` — messages include `tool_calls` |
+| `/api/sessions/{id}` | PATCH | `{title}` — rename (returns 400 on empty) |
+| `/api/sessions/{id}` | DELETE | Remove session + cascade messages |
+| `/api/sessions/{id}/export` | GET | Download conversation as Markdown (`Content-Disposition: attachment; filename="chat-<id>.md"`) |
+
+### Config / models
+
+| Route | Method | Purpose |
+|-------|--------|---------|
+| `/api/config?sid=...` | GET | Read safe config keys for a session |
+| `/api/config` | PATCH | `{session_id, config: {key:value, ...}}` — writable keys: `model`, `permission_mode`, `verbose`, `thinking`, `thinking_budget`, `max_tokens`, plus per-provider API keys (session-only, not persisted) |
+| `/api/models` | GET | `{providers: [{provider, models, context_limit, needs_api_key, has_api_key}, ...]}` |
+
+### Ops
+
+| Route | Method | Response |
+|-------|--------|----------|
+| `/health` | GET | `200 {"ok": true, "db": "ok", "uptime_s": ...}` or `503` with `db_err` if the DB is unreachable |
+| `/metrics` | GET | Prometheus v0.0.4 text. Exports `cheetahclaws_uptime_seconds`, `cheetahclaws_requests_total`, `cheetahclaws_requests_4xx`, `cheetahclaws_requests_5xx`, `cheetahclaws_auth_logins_total`, `cheetahclaws_auth_logins_failed`, `cheetahclaws_auth_registrations_total`, `cheetahclaws_users_total`, `cheetahclaws_ws_connections_total` |
+
+### WebSocket events
+
+Frames are newline-delimited JSON objects with `{type, data, ts}`.
+
+| `type` | `data` fields | When |
+|--------|---------------|------|
+| `text_chunk` | `text` | Assistant streams text |
+| `thinking_chunk` | `text` | Extended thinking chunk |
+| `tool_start` | `name`, `inputs` | Tool invocation starts |
+| `tool_end` | `name`, `result`, `permitted` | Tool finished / denied |
+| `permission_request` | `description` | Agent asks for approval |
+| `permission_response` | `granted` | After user answers |
+| `turn_done` | `input_tokens`, `output_tokens` | End of a turn |
+| `status` | `state: "running" \| "idle"` | Status transitions |
+| `command_result` | `command`, `output` | Slash command finished |
+| `interactive_menu` | `menu`, `items` | `/ssj` etc. |
+| `input_request` | `prompt`, `command`, `placeholder` | Command wants a parameter |
+| `error` | `message` | Something blew up |
+
+---
+
+## Observability
+
+### Structured JSON logging
+
+Every HTTP response emits one JSON record on stderr through the `web.server` logger:
 
 ```json
-{
-  "providers": [
-    {
-      "provider": "anthropic",
-      "models": ["claude-opus-4-6", "claude-sonnet-4-6", ...],
-      "context_limit": 200000,
-      "needs_api_key": true,
-      "has_api_key": true
-    },
-    ...
-  ]
-}
+{"ts":1776368300.054,"level":"info","logger":"web.server","msg":"req","method":"POST","path":"/api/auth/login","status":200,"dur_ms":259,"user_id":1,"peer":"127.0.0.1:45122"}
 ```
 
-### `POST /api/auth`
+Other structured events: `server_start`, `server_stop`, `register`, `login`, `login_failed`, `db_init_failed`, `message persist failed` (from `web.api`). Level controlled by `CHEETAHCLAWS_LOG_LEVEL` (default `INFO`; set `DEBUG` for verbose).
 
-Login and get a session cookie.
+Child loggers (`web.server`, `web.auth`, `web.api`, `web.db`) all inherit the JSON formatter set up in `web/logging_setup.py`.
 
-```json
-{"token": "aBcDeF"}
+### Metrics
+
+Point Prometheus at `/metrics` — it returns v0.0.4 text format. The in-process counters are updated inline by `_send_http` (status-coded buckets) and the auth routes (login_total / login_failed / registrations_total). `users_total` reads from the DB.
+
+### Testing
+
+```bash
+pytest tests/test_web_api.py -v
 ```
 
-Returns `Set-Cookie: cctoken=...; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400`.
+21 end-to-end tests spin the real server in a background thread on a random port, truncate the DB between tests, and drive it with `httpx`. No mocks — real SQLite, real bcrypt, real JWT. Runs in ~5s.
 
-## Architecture
+---
+
+## Environment variables
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `CHEETAHCLAWS_WEB_DB` | `~/.cheetahclaws/web.db` | SQLite file path |
+| `CHEETAHCLAWS_WEB_SECRET` | persisted to `~/.cheetahclaws/web_secret` | JWT HS256 signing key |
+| `CHEETAHCLAWS_LOG_LEVEL` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
+| `CHEETAHCLAWS_WEB_SERVER` | set by `start_web_server` to `1` | Guards against recursive `--web` launches via shell aliases |
+
+---
+
+## Architecture notes
 
 ```
 web/
-  server.py     — Pure-stdlib HTTP server, WebSocket (RFC 6455), SSE, routing
-  api.py        — ChatSession, event broadcasting, slash command handling
-  chat.html     — Self-contained chat UI (CSS + JS, no build step)
-  marked.min.js — Markdown renderer (bundled)
-  xterm.min.js  — Terminal emulator (bundled)
-  xterm.min.css — Terminal styles
-  addon-*.js    — xterm addons (fit, web-links)
+  server.py           — stdlib HTTP + WebSocket (RFC 6455) + SSE, routing, auth gates
+  api.py              — ChatSession (agent-generator → event broadcast), slash-cmd bridge
+  auth.py             — bcrypt password hashing + PyJWT encode/decode + cookie helpers
+  db.py               — SQLAlchemy engine, session_scope(), repo (CRUD helpers)
+  models.py           — User, ChatSessionRow, Message, ApiCredential ORM
+  logging_setup.py    — JsonFormatter + in-process counter snapshot
+  chat.html           — the shell (thin — most logic moved to static/js/*.js)
+  static/
+    favicon.png, favicon.ico
+    js/chat.js, util.js, auth.js, sidebar.js, tools.js,
+       approval.js, settings.js, welcome.js, init.js
+  marked.min.js       — Markdown renderer (bundled)
+  xterm.min.js / .css — Terminal emulator + styles (bundled)
 ```
 
-**Key design decisions:**
+Key design choices:
 
-- **Pure stdlib** — no Flask, no aiohttp, no external Python deps. The server is a raw socket handler with manual HTTP parsing and RFC 6455 WebSocket implementation.
-- **In-process agent** — the Chat UI runs `agent.run()` directly (not via a PTY subprocess). Events are broadcast through a `queue.Queue` fan-out to WebSocket subscribers.
-- **Event buffer** — events are buffered so late-connecting WebSocket clients can replay missed events.
-- **Thread-local stdout** — long-running commands redirect their thread's stdout to broadcast `text_chunk` events without affecting other threads.
-- **SSE for long commands** — `/brainstorm`, `/worker`, `/plan`, `/agent` use Server-Sent Events over a kept-alive HTTP connection. No WebSocket required.
-- **Cookie auth** — `HttpOnly` + `SameSite=Strict` cookie. WebSocket and EventSource connections carry the cookie automatically. No token in URL query strings.
+- **Pure stdlib HTTP server.** Raw sockets, manual header parsing, RFC 6455 WebSocket implementation. No Flask / FastAPI / aiohttp. The only new runtime deps are the three chat-UI extras (`sqlalchemy`, `passlib[bcrypt]`, `PyJWT`).
+- **In-process agent.** The Chat UI runs `agent.run()` directly (no PTY subprocess). A `queue.Queue` fans events out to WS subscribers; a 500-event ring buffer lets late-joining subscribers replay missed events.
+- **Write-through persistence.** Messages live in memory (for fast replay) AND SQLite (for survival). Config changes PATCH both.
+- **Two cookies on the same origin.** Chat UI uses `ccjwt` (7-day JWT), PTY terminal uses `cctoken` (one-time password). The browser sends both; each route only reads the one it cares about.
+- **Thread-local request context** for access logs: `_req_ctx` holds method/path/start_ts/user_id/peer. `_send_http` reads it once per response and logs + increments counters.
+- **Auto-port** with explicit-port override: if `--port` is omitted, try 8080, fall back to `bind(host, 0)` to let the kernel pick any free port. Explicit `--port N` binds exactly N or fails.
+- **ETag + `no-cache`** on JS/CSS/HTML so edits show up on plain reload (no hard-refresh needed), while images/fonts keep 24h cache.
 
-## Comparison: Chat UI vs PTY Terminal
-
-| Aspect | Chat UI (`/chat`) | PTY Terminal (`/`) |
-|--------|--------------------|--------------------|
-| Rendering | Structured (Markdown, cards, buttons) | Raw ANSI terminal |
-| Tool calls | Collapsible cards with status badges | Text output |
-| Permissions | Click Allow/Deny buttons | Type y/N |
-| Slash commands | Interactive menus, input boxes | Text prompts |
-| Theme | Dark/Light toggle | Dark only |
-| Settings | GUI panel | `/config` command |
-| Feature parity | Most features via structured events | 100% (it IS the terminal) |
-| Best for | Regular use, mobile, demo | Power users, debugging, features not yet in Chat UI |
+---
 
 ## Troubleshooting
 
-**Chat shows "disconnected"**
-The WebSocket connection dropped. The UI auto-reconnects with exponential backoff. For slash commands, results are delivered via POST (no WS needed). For streaming prompts, the event buffer replays missed events on reconnect.
+**"No users, please register" on first visit**
+That's expected. Fill in the `Create your first account` form; the first user becomes admin.
 
-**"Failed to send" error**
-Check that the server is running and the cookie is valid. Try refreshing the page to re-authenticate.
+**401 on every API call**
+The `ccjwt` cookie is missing or expired. Refresh the page; the Chat UI will pop the login overlay automatically.
 
-**Brainstorm shows "Working..." with no progress**
-If using the POST fallback (WS unavailable), the brainstorm runs server-side and results appear when the command completes. For real-time streaming, ensure the SSE path is used (the Chat UI does this automatically for `/brainstorm`).
+**8080 is taken**
+`cheetahclaws --web` (with no `--port`) auto-falls back to a free port — check the banner for the real URL. If you must use 8080, stop the conflicting process first.
+
+**I changed a JS file but the browser shows the old version**
+Normal reload now works (we send `Cache-Control: no-cache, must-revalidate` + weak ETag). If it's really stuck, `Ctrl+Shift+R` / `Cmd+Shift+R` forces a bypass.
+
+**Lost my admin password**
+Blow away the SQLite DB and re-register: `rm ~/.cheetahclaws/web.db` then restart. You'll lose all chat history — for real recovery, open the DB with any SQLite client and rewrite the `password_hash` (bcrypt hash via passlib).
 
 **Can't connect from another device**
-Use `--host 0.0.0.0` to listen on all interfaces. The password is printed on the server's terminal.
+Start with `--host 0.0.0.0`. Your firewall must also allow the port, and mobile devices need to reach the host by IP (not `localhost`).
+
+**Prometheus scrape is failing**
+`/metrics` returns plain text at `text/plain; version=0.0.4`. It's unauthenticated and works without the `ccjwt` cookie. If it 401s, you're hitting `/api/metrics` instead of `/metrics` — note the leading segment.
+
+**"DB init failed" on startup**
+The log line is JSON with the full exception. Usually a file-permission issue on `~/.cheetahclaws/web.db` or a broken install of SQLAlchemy. Verify `pip install 'cheetahclaws[web]'` completed without errors.
+
+---
+
+## What's NOT implemented yet
+
+These are candidates for a later phase — the web UI is production-capable today but these would round it out:
+
+- WebSocket auto-reconnect after suspend/resume (currently retries with backoff but doesn't handle laptop-lid-close perfectly).
+- Rate limiting on auth endpoints (bcrypt is slow, which is your main guardrail today).
+- CSRF protection (`SameSite=Strict` is the current defense).
+- AES-GCM encryption for `api_credentials.api_key` at rest.
+- Alembic migrations (schema is still `Base.metadata.create_all`).
+- ARIA labels / keyboard-only navigation for accessibility.
+- Mobile touch gestures beyond what responsive CSS gives.
+
+PRs welcome.

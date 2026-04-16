@@ -35,16 +35,22 @@ from typing import Optional
 DEFAULT_PORT = 8080
 _WEB_DIR = Path(__file__).resolve().parent
 
-_server_password: Optional[str] = None
+_server_password: Optional[str] = None   # terminal (/) auth only
 _server_no_auth = False
 _server_cmd: list[str] = []
+_chat_ui_ready = False  # set by _try_init_chat_auth after deps loaded
 
 _MIME = {
     ".js": "application/javascript",
     ".css": "text/css",
     ".html": "text/html",
-    ".ico": "image/x-icon",
+    ".ico": "image/vnd.microsoft.icon",
     ".png": "image/png",
+    ".svg": "image/svg+xml",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
 }
 
 
@@ -154,6 +160,9 @@ def _build_html(no_auth: bool = False) -> str:
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>CheetahClaws Web Terminal</title>
+<link rel="icon" type="image/png" sizes="256x256" href="/static/favicon.png">
+<link rel="icon" type="image/x-icon" sizes="any" href="/favicon.ico">
+<link rel="apple-touch-icon" href="/static/favicon.png">
 <link rel="stylesheet" href="/xterm.min.css">
 <style>
   * {{ margin:0; padding:0; box-sizing:border-box; }}
@@ -396,6 +405,36 @@ def _cors_origin(request_origin: str = "") -> str:
     return ""
 
 
+_req_ctx = threading.local()
+
+
+def _emit_access_log(status_code: int) -> None:
+    """Log one line per HTTP response; updates counters. Idempotent per req."""
+    if getattr(_req_ctx, "logged", False):
+        return
+    _req_ctx.logged = True
+    try:
+        from web.logging_setup import get_logger, incr
+        start = getattr(_req_ctx, "start_ts", None)
+        dur_ms = (int((time.monotonic() - start) * 1000)
+                  if start is not None else 0)
+        get_logger("server").info("req", extra={
+            "method": getattr(_req_ctx, "method", "-"),
+            "path": getattr(_req_ctx, "path", "-"),
+            "status": status_code,
+            "dur_ms": dur_ms,
+            "user_id": getattr(_req_ctx, "user_id", None),
+            "peer": getattr(_req_ctx, "peer", None),
+        })
+        incr("requests_total")
+        if 400 <= status_code < 500:
+            incr("requests_4xx")
+        elif 500 <= status_code < 600:
+            incr("requests_5xx")
+    except Exception:  # noqa: BLE001
+        pass  # never let logging break request handling
+
+
 def _send_http(sock: socket.socket, status: str, content_type: str,
                body: bytes, extra_headers: str = "",
                request_origin: str = "") -> None:
@@ -405,7 +444,7 @@ def _send_http(sock: socket.socket, status: str, content_type: str,
         cors = (
             f"Access-Control-Allow-Origin: {origin}\r\n"
             f"Access-Control-Allow-Credentials: true\r\n"
-            f"Access-Control-Allow-Methods: GET, POST, PATCH, OPTIONS\r\n"
+            f"Access-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS\r\n"
             f"Access-Control-Allow-Headers: Content-Type\r\n"
             f"Vary: Origin\r\n"
         )
@@ -419,6 +458,10 @@ def _send_http(sock: socket.socket, status: str, content_type: str,
         f"\r\n"
     )
     sock.sendall(header.encode() + body)
+    try:
+        _emit_access_log(int(status.split()[0]))
+    except (ValueError, IndexError):
+        pass
 
 
 def _send_json(sock: socket.socket, obj: dict,
@@ -430,10 +473,10 @@ def _send_json(sock: socket.socket, obj: dict,
 
 def _check_auth(query: str = "", body_token: str = "",
                 cookie_str: str = "") -> bool:
-    """Check auth token from JSON body, cookie, or query (timing-safe).
+    """Check terminal (/index.html) password auth — one-time generated pwd.
 
-    Preference order: body_token > cookie > query string.
-    Cookie and body are preferred because they don't leak into access logs.
+    Chat UI endpoints use JWT via `_jwt_user_id` instead; this helper only
+    gates the PTY-terminal endpoints.
     """
     if _server_no_auth:
         return True
@@ -453,6 +496,50 @@ def _check_auth(query: str = "", body_token: str = "",
     if not token or not _server_password:
         return False
     return hmac.compare_digest(token, _server_password)
+
+
+def _jwt_user_id(cookie_str: str) -> Optional[int]:
+    """Return the chat-UI user id authenticated by the ccjwt cookie, or None.
+
+    Also stamps the user id onto the per-request log context so access logs
+    record who made the request. In --no-auth mode we return a synthetic id.
+    """
+    uid: Optional[int] = None
+    if _server_no_auth:
+        uid = 1
+    else:
+        try:
+            from web.auth import decode_token
+        except ImportError:
+            return None
+        if not cookie_str:
+            return None
+        for part in cookie_str.split(";"):
+            part = part.strip()
+            if part.startswith("ccjwt="):
+                from urllib.parse import unquote
+                token = unquote(part[len("ccjwt="):])
+                payload = decode_token(token)
+                if not payload:
+                    return None
+                try:
+                    uid = int(payload.get("sub", ""))
+                except (TypeError, ValueError):
+                    return None
+                break
+    if uid is not None:
+        _req_ctx.user_id = uid
+    return uid
+
+
+def _require_user(sock, cookie_str: str, origin: str) -> Optional[int]:
+    """Return user_id or send 401 + close socket and return None."""
+    uid = _jwt_user_id(cookie_str)
+    if uid is None:
+        _send_http(sock, "401 Unauthorized", "application/json",
+                   b'{"error":"auth required"}', request_origin=origin)
+        sock.close()
+    return uid
 
 
 # ── WebSocket frame helpers (RFC 6455) ───────────────────────────────────
@@ -704,7 +791,8 @@ def _handle_sse_stream(sock: socket.socket, sid: str,
 
 # ── Chat WebSocket handler (structured events) ─────────────────────────
 
-def _handle_chat_websocket(sock: socket.socket, extra: bytes) -> None:
+def _handle_chat_websocket(sock: socket.socket, extra: bytes,
+                            user_id: int) -> None:
     """Handle /api/events WebSocket: stream ChatEvents to browser.
 
     Auth is already verified at the HTTP layer before the WS upgrade.
@@ -726,7 +814,8 @@ def _handle_chat_websocket(sock: socket.socket, extra: bytes) -> None:
             pass
 
     from web.api import get_chat_session
-    chat_session = get_chat_session(session_id)
+    from cc_config import load_config
+    chat_session = get_chat_session(session_id, user_id, load_config())
     if not chat_session:
         try:
             _ws_send(bsock, json.dumps({"error": "session not found"}).encode(),
@@ -791,6 +880,14 @@ def _handle_chat_websocket(sock: socket.socket, extra: bytes) -> None:
 # ── Connection handler ───────────────────────────────────────────────────
 
 def _handle_connection(sock: socket.socket, addr: tuple) -> None:
+    # Reset per-request logging context. Each connection = one request (HTTP/1.1
+    # Connection: close), so thread-local is safe.
+    _req_ctx.start_ts = time.monotonic()
+    _req_ctx.method = "-"
+    _req_ctx.path = "-"
+    _req_ctx.user_id = None
+    _req_ctx.peer = f"{addr[0]}:{addr[1]}" if addr else None
+    _req_ctx.logged = False
     try:
         sock.settimeout(30)
         raw = _recv_until(sock, b"\r\n\r\n")
@@ -813,6 +910,8 @@ def _handle_connection(sock: socket.socket, addr: tuple) -> None:
         if len(parts) < 2:
             sock.close()
             return
+        _req_ctx.method = parts[0]
+        _req_ctx.path = parts[1].split("?", 1)[0]
 
         method, raw_path = parts[0], parts[1]
         path = raw_path.split("?")[0]
@@ -859,6 +958,199 @@ def _handle_connection(sock: socket.socket, addr: tuple) -> None:
                 )
             _send_http(sock, "204 No Content", "text/plain", b"",
                        cors_hdrs)
+            sock.close()
+            return
+
+        # ── Ops endpoints (unauthenticated) ─────────────────────────
+
+        if path == "/health" and method == "GET":
+            db_ok = True
+            db_err: Optional[str] = None
+            try:
+                from web.db import init_db, repo as dbrepo
+                init_db()
+                dbrepo.user_count()  # touches the DB
+            except Exception as exc:  # noqa: BLE001
+                db_ok = False
+                db_err = str(exc)
+            from web.logging_setup import uptime_seconds
+            payload = {
+                "ok": db_ok,
+                "db": "ok" if db_ok else "error",
+                "uptime_s": round(uptime_seconds(), 1),
+            }
+            if not db_ok:
+                payload["db_err"] = db_err
+            body = json.dumps(payload).encode()
+            status = "200 OK" if db_ok else "503 Service Unavailable"
+            _send_http(sock, status, "application/json", body,
+                       request_origin=origin)
+            sock.close()
+            return
+
+        if path == "/metrics" and method == "GET":
+            # Prometheus text exposition format (v0.0.4)
+            try:
+                from web.logging_setup import snapshot, uptime_seconds
+                counters = snapshot()
+            except Exception:  # noqa: BLE001
+                counters = {}
+            extras: dict[str, int] = {}
+            try:
+                from web.db import init_db, repo as dbrepo
+                init_db()
+                extras["users_total"] = dbrepo.user_count()
+            except Exception:  # noqa: BLE001
+                pass
+            lines: list[str] = []
+            lines.append("# HELP cheetahclaws_uptime_seconds Server uptime")
+            lines.append("# TYPE cheetahclaws_uptime_seconds gauge")
+            lines.append(f"cheetahclaws_uptime_seconds "
+                         f"{round(uptime_seconds(), 3)}")
+            for k, v in {**counters, **extras}.items():
+                lines.append(f"# HELP cheetahclaws_{k} {k}")
+                lines.append(f"# TYPE cheetahclaws_{k} counter")
+                lines.append(f"cheetahclaws_{k} {v}")
+            body = ("\n".join(lines) + "\n").encode()
+            _send_http(sock, "200 OK", "text/plain; version=0.0.4",
+                       body, request_origin=origin)
+            sock.close()
+            return
+
+        # ── Chat-UI auth (JWT-based, separate from terminal /api/auth) ──
+
+        # GET /api/auth/bootstrap — does any user exist yet?
+        if path == "/api/auth/bootstrap" and method == "GET":
+            try:
+                from web.db import init_db, repo as dbrepo
+                init_db()
+                has_users = dbrepo.user_count() > 0
+            except Exception as exc:  # noqa: BLE001
+                _send_json(sock, {"error": str(exc)}, request_origin=origin)
+                sock.close()
+                return
+            _send_json(sock, {"has_users": has_users,
+                              "no_auth": _server_no_auth},
+                       request_origin=origin)
+            sock.close()
+            return
+
+        # POST /api/auth/register — create user (open in v1; first user → admin)
+        if path == "/api/auth/register" and method == "POST":
+            username = (body_json.get("username") or "").strip()
+            password = body_json.get("password") or ""
+            if len(username) < 2 or len(password) < 6:
+                _send_http(sock, "400 Bad Request", "application/json",
+                           b'{"error":"username >= 2 chars, password >= 6"}',
+                           request_origin=origin)
+                sock.close()
+                return
+            try:
+                from web.db import init_db, repo as dbrepo
+                from web.auth import hash_password, issue_token, build_cookie
+                init_db()
+                if dbrepo.get_user_by_username(username) is not None:
+                    _send_http(sock, "409 Conflict", "application/json",
+                               b'{"error":"username taken"}',
+                               request_origin=origin)
+                    sock.close()
+                    return
+                is_admin = dbrepo.user_count() == 0
+                user = dbrepo.create_user(username, hash_password(password),
+                                          is_admin=is_admin)
+                token = issue_token(user["id"], user["username"])
+                from web.logging_setup import get_logger, incr
+                incr("auth_registrations_total")
+                get_logger("auth").info("register", extra={
+                    "username": user["username"], "user_id": user["id"],
+                    "is_admin": is_admin,
+                })
+                _send_http(sock, "200 OK", "application/json",
+                           json.dumps({"ok": True, "user": user}).encode(),
+                           extra_headers=build_cookie(token),
+                           request_origin=origin)
+            except Exception as exc:  # noqa: BLE001
+                _send_http(sock, "500 Internal Server Error",
+                           "application/json",
+                           json.dumps({"error": str(exc)}).encode(),
+                           request_origin=origin)
+            sock.close()
+            return
+
+        # POST /api/auth/login — bcrypt verify → issue JWT cookie
+        if path == "/api/auth/login" and method == "POST":
+            username = (body_json.get("username") or "").strip()
+            password = body_json.get("password") or ""
+            try:
+                from web.db import init_db, repo as dbrepo
+                from web.auth import (verify_password, issue_token,
+                                       build_cookie)
+                init_db()
+                rec = dbrepo.get_user_by_username(username)
+                if not rec or not verify_password(password,
+                                                   rec["password_hash"]):
+                    from web.logging_setup import incr, get_logger
+                    incr("auth_logins_failed")
+                    get_logger("auth").warning("login_failed",
+                                                extra={"username": username})
+                    _send_http(sock, "401 Unauthorized", "application/json",
+                               b'{"error":"invalid credentials"}',
+                               request_origin=origin)
+                    sock.close()
+                    return
+                token = issue_token(rec["id"], rec["username"])
+                from web.logging_setup import incr, get_logger
+                incr("auth_logins_total")
+                get_logger("auth").info("login", extra={
+                    "user_id": rec["id"], "username": rec["username"],
+                })
+                _send_http(sock, "200 OK", "application/json",
+                           json.dumps({"ok": True,
+                                       "user": {"id": rec["id"],
+                                                "username": rec["username"],
+                                                "is_admin": rec["is_admin"]}
+                                       }).encode(),
+                           extra_headers=build_cookie(token),
+                           request_origin=origin)
+            except Exception as exc:  # noqa: BLE001
+                _send_http(sock, "500 Internal Server Error",
+                           "application/json",
+                           json.dumps({"error": str(exc)}).encode(),
+                           request_origin=origin)
+            sock.close()
+            return
+
+        # POST /api/auth/logout — clear cookie
+        if path == "/api/auth/logout" and method == "POST":
+            clear = ("Set-Cookie: ccjwt=; Path=/; HttpOnly; SameSite=Strict; "
+                     "Max-Age=0\r\n")
+            _send_http(sock, "200 OK", "application/json", b'{"ok":true}',
+                       extra_headers=clear, request_origin=origin)
+            sock.close()
+            return
+
+        # GET /api/auth/whoami — return current user
+        if path == "/api/auth/whoami" and method == "GET":
+            uid = _jwt_user_id(cookie)
+            if uid is None:
+                _send_http(sock, "401 Unauthorized", "application/json",
+                           b'{"error":"not logged in"}',
+                           request_origin=origin)
+                sock.close()
+                return
+            try:
+                from web.db import init_db, repo as dbrepo
+                init_db()
+                user = dbrepo.get_user(uid)
+            except Exception:  # noqa: BLE001
+                user = None
+            if not user:
+                _send_http(sock, "401 Unauthorized", "application/json",
+                           b'{"error":"user missing"}',
+                           request_origin=origin)
+                sock.close()
+                return
+            _send_json(sock, {"user": user}, request_origin=origin)
             sock.close()
             return
 
@@ -1007,18 +1299,16 @@ def _handle_connection(sock: socket.socket, addr: tuple) -> None:
 
         # ── POST /api/prompt — submit prompt to chat session ────────
         if path == "/api/prompt" and method == "POST":
-            if not _check_auth(query, body_json.get("token", ""),
-                               cookie_str=cookie):
-                _send_http(sock, "401 Unauthorized", "text/plain",
-                           b"Unauthorized", request_origin=origin)
-                sock.close()
+            uid = _require_user(sock, cookie, origin)
+            if uid is None:
                 return
             from web.api import create_chat_session, get_chat_session
+            from cc_config import load_config
             sid = body_json.get("session_id", "")
-            chat_sess = get_chat_session(sid) if sid else None
+            chat_sess = (get_chat_session(sid, uid, load_config())
+                         if sid else None)
             if not chat_sess:
-                from cc_config import load_config
-                chat_sess = create_chat_session(load_config())
+                chat_sess = create_chat_session(load_config(), uid)
             prompt = body_json.get("prompt", "")
             if prompt and prompt.startswith("/"):
                 # Check if client wants SSE streaming
@@ -1093,8 +1383,9 @@ def _handle_connection(sock: socket.socket, addr: tuple) -> None:
 
         # ── WS /api/events — structured event stream ────────────────
         if path == "/api/events" and "upgrade" in headers.get("connection", "").lower():
-            # Auth check BEFORE upgrade — reject with 401, no WS handshake
-            if not _check_auth(query, cookie_str=cookie):
+            # JWT auth BEFORE upgrade — reject with 401, no WS handshake
+            uid = _jwt_user_id(cookie)
+            if uid is None:
                 _send_http(sock, "401 Unauthorized", "text/plain",
                            b"Unauthorized", request_origin=origin)
                 sock.close()
@@ -1114,7 +1405,7 @@ def _handle_connection(sock: socket.socket, addr: tuple) -> None:
             )
             sock.sendall(handshake.encode())
             sock.settimeout(None)
-            _handle_chat_websocket(sock, extra)
+            _handle_chat_websocket(sock, extra, user_id=uid)
             try:
                 sock.close()
             except OSError:
@@ -1123,16 +1414,14 @@ def _handle_connection(sock: socket.socket, addr: tuple) -> None:
 
         # ── POST /api/approve — respond to permission request ───────
         if path == "/api/approve" and method == "POST":
-            if not _check_auth(query, body_json.get("token", ""),
-                               cookie_str=cookie):
-                _send_http(sock, "401 Unauthorized", "text/plain",
-                           b"Unauthorized", request_origin=origin)
-                sock.close()
+            uid = _require_user(sock, cookie, origin)
+            if uid is None:
                 return
             from web.api import get_chat_session
+            from cc_config import load_config
             sid = body_json.get("session_id", "")
             granted = body_json.get("granted", False)
-            chat_sess = get_chat_session(sid)
+            chat_sess = get_chat_session(sid, uid, load_config())
             if chat_sess:
                 chat_sess.approve_permission(granted)
                 _send_json(sock, {"ok": True}, request_origin=origin)
@@ -1142,51 +1431,97 @@ def _handle_connection(sock: socket.socket, addr: tuple) -> None:
             sock.close()
             return
 
-        # ── GET /api/sessions — list or get chat sessions ───────────
-        if path.startswith("/api/sessions") and method == "GET":
-            if not _check_auth(query, cookie_str=cookie):
-                _send_http(sock, "401 Unauthorized", "text/plain",
-                           b"Unauthorized", request_origin=origin)
+        # ── /api/sessions — list / get / rename / delete / export ───
+        if path.startswith("/api/sessions"):
+            uid = _require_user(sock, cookie, origin)
+            if uid is None:
+                return
+            from web.api import (list_chat_sessions, get_chat_session,
+                                  rename_chat_session, remove_chat_session,
+                                  export_chat_session_markdown)
+            from cc_config import load_config
+            parts_path = path.rstrip("/").split("/")
+            # GET /api/sessions
+            if len(parts_path) == 3 and method == "GET":
+                _send_json(sock, {"sessions": list_chat_sessions(uid)},
+                           request_origin=origin)
                 sock.close()
                 return
-            from web.api import list_chat_sessions, get_chat_session
-            parts_path = path.rstrip("/").split("/")
-            if len(parts_path) == 3:
-                # GET /api/sessions → list all
-                _send_json(sock, {"sessions": list_chat_sessions()},
-                           request_origin=origin)
-            elif len(parts_path) == 4:
-                # GET /api/sessions/{id} → get one
-                chat_sess = get_chat_session(parts_path[3])
-                if chat_sess:
+            # /api/sessions/{id}
+            if len(parts_path) == 4:
+                sid = parts_path[3]
+                if method == "GET":
+                    chat_sess = get_chat_session(sid, uid, load_config())
+                    if not chat_sess:
+                        _send_http(sock, "404 Not Found", "text/plain",
+                                   b"session not found", request_origin=origin)
+                        sock.close()
+                        return
                     _send_json(sock, {
                         "id": chat_sess.session_id,
+                        "title": chat_sess.title,
                         "messages": chat_sess.get_messages(),
                         "config": chat_sess.get_safe_config(),
                         "busy": not chat_sess.is_idle(),
                     }, request_origin=origin)
-                else:
+                    sock.close()
+                    return
+                if method == "PATCH":
+                    title = (body_json.get("title") or "").strip()
+                    if not title:
+                        _send_http(sock, "400 Bad Request", "application/json",
+                                   b'{"error":"title required"}',
+                                   request_origin=origin)
+                        sock.close()
+                        return
+                    ok = rename_chat_session(sid, uid, title)
+                    if ok:
+                        _send_json(sock, {"ok": True, "title": title[:200]},
+                                   request_origin=origin)
+                    else:
+                        _send_http(sock, "404 Not Found", "application/json",
+                                   b'{"error":"not found"}',
+                                   request_origin=origin)
+                    sock.close()
+                    return
+                if method == "DELETE":
+                    ok = remove_chat_session(sid, uid)
+                    _send_json(sock, {"ok": ok}, request_origin=origin)
+                    sock.close()
+                    return
+            # GET /api/sessions/{id}/export
+            if (len(parts_path) == 5 and parts_path[4] == "export"
+                    and method == "GET"):
+                sid = parts_path[3]
+                md = export_chat_session_markdown(sid, uid)
+                if md is None:
                     _send_http(sock, "404 Not Found", "text/plain",
                                b"session not found", request_origin=origin)
-            else:
-                _send_http(sock, "404 Not Found", "text/plain",
-                           b"Not Found", request_origin=origin)
+                else:
+                    fname = f"chat-{sid}.md"
+                    cd = (f"Content-Disposition: attachment; "
+                          f"filename=\"{fname}\"\r\n")
+                    _send_http(sock, "200 OK", "text/markdown; charset=utf-8",
+                               md.encode("utf-8"),
+                               extra_headers=cd, request_origin=origin)
+                sock.close()
+                return
+            _send_http(sock, "404 Not Found", "text/plain", b"Not Found",
+                       request_origin=origin)
             sock.close()
             return
 
         # ── GET/PATCH /api/config — read/write session config ───────
         if path == "/api/config":
-            if not _check_auth(query, body_json.get("token", ""),
-                               cookie_str=cookie):
-                _send_http(sock, "401 Unauthorized", "text/plain",
-                           b"Unauthorized", request_origin=origin)
-                sock.close()
+            uid = _require_user(sock, cookie, origin)
+            if uid is None:
                 return
             from web.api import get_chat_session
+            from cc_config import load_config
             sid = body_json.get("session_id", "") or \
                   (query.split("sid=")[1].split("&")[0]
                    if "sid=" in query else "")
-            chat_sess = get_chat_session(sid) if sid else None
+            chat_sess = get_chat_session(sid, uid, load_config()) if sid else None
             if method == "GET" and chat_sess:
                 _send_json(sock, chat_sess.get_safe_config(),
                            request_origin=origin)
@@ -1201,10 +1536,7 @@ def _handle_connection(sock: socket.socket, addr: tuple) -> None:
 
         # ── GET /api/models — list available providers and models ────
         if path == "/api/models" and method == "GET":
-            if not _check_auth(query, cookie_str=cookie):
-                _send_http(sock, "401 Unauthorized", "text/plain",
-                           b"Unauthorized", request_origin=origin)
-                sock.close()
+            if _require_user(sock, cookie, origin) is None:
                 return
             from web.api import get_available_models
             _send_json(sock, {"providers": get_available_models()},
@@ -1226,13 +1558,38 @@ def _handle_connection(sock: socket.socket, addr: tuple) -> None:
         else:
             fname = path.lstrip("/")
             fpath = _WEB_DIR / fname
-            if (fpath.exists() and fpath.parent == _WEB_DIR
-                    and not fname.startswith(".")):
+            # Allow subdirectories (e.g. static/js/*.js) but guard against
+            # path traversal: resolved target must stay inside _WEB_DIR.
+            try:
+                safe = fpath.resolve().is_relative_to(_WEB_DIR.resolve())
+            except (OSError, ValueError):
+                safe = False
+            if (safe and fpath.is_file()
+                    and not any(seg.startswith(".") for seg in fpath.parts)):
                 body = fpath.read_bytes()
                 ctype = _MIME.get(fpath.suffix, "application/octet-stream")
-                _send_http(sock, "200 OK", ctype, body,
-                           "Cache-Control: public, max-age=86400\r\n",
-                           request_origin=origin)
+                # Revalidate app code (JS/CSS/HTML) on every load so edits
+                # show up without forcing users to hard-refresh. Cache assets
+                # (images, fonts, libs) longer since they rarely change.
+                is_app_code = fpath.suffix in (".js", ".css", ".html")
+                cache_hdr = ("Cache-Control: no-cache, must-revalidate\r\n"
+                             if is_app_code else
+                             "Cache-Control: public, max-age=86400\r\n")
+                # Weak ETag from mtime+size lets the browser 304 when unchanged
+                try:
+                    st = fpath.stat()
+                    etag = f'W/"{int(st.st_mtime)}-{st.st_size}"'
+                    cache_hdr += f"ETag: {etag}\r\n"
+                except OSError:
+                    etag = None
+                # Honor If-None-Match → 304
+                inm = headers.get("if-none-match", "")
+                if etag and inm and inm.strip() == etag:
+                    _send_http(sock, "304 Not Modified", ctype, b"",
+                               cache_hdr, request_origin=origin)
+                else:
+                    _send_http(sock, "200 OK", ctype, body,
+                               cache_hdr, request_origin=origin)
             else:
                 _send_http(sock, "404 Not Found", "text/plain", b"Not Found",
                            request_origin=origin)
@@ -1242,10 +1599,10 @@ def _handle_connection(sock: socket.socket, addr: tuple) -> None:
     except (TimeoutError, ConnectionResetError, BrokenPipeError):
         pass  # normal for idle/dropped connections
     except Exception as exc:
-        import traceback
-        print(f"\033[31m[web] {addr} error: {exc}\033[0m", file=sys.stderr,
-              flush=True)
-        traceback.print_exc(file=sys.stderr)
+        from web.logging_setup import get_logger
+        get_logger("server").exception("connection handler crashed",
+                                        extra={"peer": str(addr),
+                                               "err": str(exc)})
     finally:
         try:
             sock.close()
@@ -1279,8 +1636,31 @@ def _reap_stale_sessions() -> None:
             pass
 
 
+def _bind_port(host: str, preferred: Optional[int]) -> tuple[socket.socket, int]:
+    """Bind a listening socket. When `preferred` is None we try the default
+    port first and fall back to an OS-chosen free port if it's taken — so
+    `cheetahclaws --web` Just Works even when 8080 is in use. When the user
+    passes an explicit port we bind it (or fail loudly) to respect intent."""
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    if preferred is not None:
+        # User-specified port — bind it or let the error propagate.
+        srv.bind((host, preferred))
+        return srv, preferred
+    try:
+        srv.bind((host, DEFAULT_PORT))
+        return srv, DEFAULT_PORT
+    except OSError as exc:
+        if exc.errno not in (98, 48):  # EADDRINUSE on Linux / macOS
+            srv.close()
+            raise
+        # Port 8080 was taken — ask the kernel for any free port.
+        srv.bind((host, 0))
+        return srv, srv.getsockname()[1]
+
+
 def start_web_server(
-    port: int = DEFAULT_PORT,
+    port: Optional[int] = None,
     host: str = "127.0.0.1",
     no_auth: bool = False,
 ) -> None:
@@ -1297,6 +1677,38 @@ def start_web_server(
     _server_password = None if no_auth else _generate_password()
     _server_no_auth = no_auth
 
+    # Install structured logging first so later errors are captured correctly.
+    try:
+        from web.logging_setup import setup_logging, get_logger
+        setup_logging()
+        _log = get_logger("server")
+    except ImportError:
+        _log = None
+
+    # Initialize chat-UI database (graceful fallback if deps missing)
+    global _chat_ui_ready
+    try:
+        from web.db import init_db, repo as dbrepo
+        init_db()
+        _chat_ui_ready = True
+        _chat_user_count = dbrepo.user_count()
+    except ImportError as exc:
+        if _log:
+            _log.warning("chat_ui_disabled_missing_deps",
+                         extra={"err": str(exc),
+                                "hint": "pip install 'cheetahclaws[web]'"})
+        else:
+            print(f"\033[33m[web] Chat UI disabled — missing deps: {exc}.\n"
+                  f"      Install with: pip install 'cheetahclaws[web]'\033[0m",
+                  file=sys.stderr)
+        _chat_user_count = 0
+    except Exception as exc:  # noqa: BLE001
+        if _log:
+            _log.exception("db_init_failed", extra={"err": str(exc)})
+        else:
+            print(f"\033[33m[web] DB init failed: {exc}\033[0m", file=sys.stderr)
+        _chat_user_count = 0
+
     cc_bin = shutil.which("cheetahclaws")
     if cc_bin:
         _server_cmd = [cc_bin]
@@ -1307,9 +1719,7 @@ def start_web_server(
     # Start background reaper for orphaned SSE sessions
     threading.Thread(target=_reap_stale_sessions, daemon=True).start()
 
-    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    srv.bind((host, port))
+    srv, port = _bind_port(host, port)
     srv.listen(5)
 
     print(f"\n  \033[36mCheetahClaws Web Terminal\033[0m", flush=True)
@@ -1319,12 +1729,24 @@ def start_web_server(
     if host == "0.0.0.0":
         print(f"  Host:     \033[33m0.0.0.0 (network accessible)\033[0m", flush=True)
     if not no_auth:
-        print(f"  Password: \033[1;33m{_server_password}\033[0m", flush=True)
+        print(f"  Terminal pwd: \033[1;33m{_server_password}\033[0m  "
+              f"\033[2m(for / index page only)\033[0m", flush=True)
+        if _chat_ui_ready:
+            if _chat_user_count == 0:
+                print(f"  Chat UI:  \033[2;33mfirst visit will prompt you "
+                      f"to register an admin account\033[0m", flush=True)
+            else:
+                print(f"  Chat UI:  \033[2m{_chat_user_count} user account"
+                      f"{'s' if _chat_user_count != 1 else ''} registered"
+                      f"\033[0m", flush=True)
     else:
         print(f"  Auth:     \033[33mdisabled\033[0m", flush=True)
     print(f"  \033[2m{'─' * 40}\033[0m", flush=True)
     print(f"  \033[2mPress Ctrl+C to stop\033[0m\n", flush=True)
 
+    if _log:
+        _log.info("server_start", extra={"host": host, "port": port,
+                                          "no_auth": no_auth})
     try:
         while True:
             client, addr = srv.accept()
@@ -1333,5 +1755,7 @@ def start_web_server(
             t.start()
     except KeyboardInterrupt:
         print("\n\033[2mWeb terminal stopped.\033[0m", flush=True)
+        if _log:
+            _log.info("server_stop")
     finally:
         srv.close()
