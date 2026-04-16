@@ -33,6 +33,8 @@ Slash commands in REPL:
   /export [f] Export conversation history to a Markdown file
   /copy       Copy the last assistant response to clipboard
   /doctor     Diagnose installation health and tool connectivity
+  /circuit    Show per-provider circuit breakers
+  /circuit reset <provider|all>   Force-close a breaker (recover from circuit_open_skip)
   /memory [query]         Show/search persistent memories
   /memory consolidate     Extract long-term insights from current session via AI
   /skills           List available skills

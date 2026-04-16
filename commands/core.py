@@ -34,9 +34,45 @@ def _get_version() -> str:
 def cmd_help(_args: str, _state, config) -> bool:
     try:
         import cheetahclaws
-        print(cheetahclaws.__doc__)
     except Exception:
         info("CheetahClaws — type /model, /save, /load, /history, /context, /exit for commands.")
+        return True
+
+    doc = cheetahclaws.__doc__ or ""
+    print(doc)
+
+    # Safety net: surface any registered command that the curated docstring
+    # forgot to mention (e.g. modular/plugin additions, or newly added commands
+    # whose author didn't update the docstring). Walks COMMANDS, groups by
+    # handler so aliases share a row, skips anything already referenced.
+    commands = getattr(cheetahclaws, "COMMANDS", {})
+    meta     = getattr(cheetahclaws, "_CMD_META", {})
+
+    aliases_by_func: dict[object, list[str]] = {}
+    for name, func in commands.items():
+        aliases_by_func.setdefault(func, []).append(name)
+
+    missing: list[tuple[str, str]] = []
+    seen: set[object] = set()
+    for func, names in aliases_by_func.items():
+        if func in seen:
+            continue
+        seen.add(func)
+        if any(f"/{n}" in doc for n in names):
+            continue
+        primary = min(names, key=len)
+        extra = [n for n in names if n != primary]
+        label = f"/{primary}" + (f" (/{', /'.join(extra)})" if extra else "")
+        desc = next((meta[n][0] for n in names if n in meta), "(no description)")
+        missing.append((label, desc))
+
+    if missing:
+        print()
+        print("Also available (auto-detected — not in curated list above):")
+        w = max(len(m[0]) for m in missing)
+        for label, desc in missing:
+            print(f"  {label:<{w}}  {desc}")
+
     return True
 
 
