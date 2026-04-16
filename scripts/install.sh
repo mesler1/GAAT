@@ -24,11 +24,23 @@ ok()    { echo -e "${GREEN}[ok]${RESET}   $*"; }
 warn()  { echo -e "${YELLOW}[warn]${RESET} $*"; }
 fail()  { echo -e "${RED}[fail]${RESET} $*"; exit 1; }
 
+# ── Center helper (used for banners) ─────────────────────────────────────
+center() {
+    local txt="$1" w="$2"
+    local len=${#txt}
+    local pad_left=$(( (w - len) / 2 ))
+    local pad_right=$(( w - len - pad_left ))
+    printf "%${pad_left}s%s%${pad_right}s" "" "$txt" ""
+}
+BOX_W=42
+
 # ── Banner ───────────────────────────────────────────────────────────────
+B1=$(center "CheetahClaws Installer" $BOX_W)
+B2=$(center "Fast AI Coding Assistant" $BOX_W)
 echo ""
 echo -e "${CYAN}  ╭──────────────────────────────────────────╮${RESET}"
-echo -e "${CYAN}  │     CheetahClaws Installer               │${RESET}"
-echo -e "${CYAN}  │     Fast AI Coding Assistant             │${RESET}"
+echo -e "${CYAN}  │${B1}│${RESET}"
+echo -e "${CYAN}  │${B2}│${RESET}"
 echo -e "${CYAN}  ╰──────────────────────────────────────────╯${RESET}"
 echo ""
 
@@ -205,10 +217,12 @@ fi
 
 # ── Print version ──────────────────────────────────────────────────────
 VERSION=$(cheetahclaws --version 2>/dev/null || echo "installed")
+L1=$(center "Installation complete!" $BOX_W)
+L2=$(center "$VERSION" $BOX_W)
 echo ""
 echo -e "${GREEN}  ╭──────────────────────────────────────────╮${RESET}"
-echo -e "${GREEN}  │  Installation complete!                  │${RESET}"
-echo -e "${GREEN}  │  ${VERSION}                              │${RESET}"
+echo -e "${GREEN}  │${L1}│${RESET}"
+echo -e "${GREEN}  │${L2}│${RESET}"
 echo -e "${GREEN}  ╰──────────────────────────────────────────╯${RESET}"
 echo ""
 # Detect the user's shell for the reload hint
