@@ -712,6 +712,83 @@ def cmd_image(args: str, state, config) -> Union[bool, tuple]:
     return ("__image__", prompt)
 
 
+_web_thread = None  # daemon thread running start_web_server(), if any
+
+
+def cmd_web(args: str, state, config) -> bool:
+    """Start the web terminal / chat UI in a background thread.
+
+    /web                          — start on 127.0.0.1:8080 (auto-picks free port)
+    /web 9000                     — use port 9000
+    /web --host 0.0.0.0           — bind to network
+    /web --no-auth                — disable terminal password (local only)
+    /web status                   — show whether it's running
+    """
+    global _web_thread
+    import threading
+
+    tokens = (args or "").strip().split()
+    sub = tokens[0].lower() if tokens else ""
+
+    if sub == "status":
+        if _web_thread and _web_thread.is_alive():
+            info("Web server: running (started via /web this session).")
+        else:
+            info("Web server: not running.")
+        return True
+
+    if _web_thread and _web_thread.is_alive():
+        info("Web server already running in this session. Use /web status to check.")
+        return True
+
+    if os.environ.get("CHEETAHCLAWS_WEB_SERVER") == "1":
+        warn("You're already inside a web-terminal session. Nested web launch refused.")
+        return True
+
+    port: int | None = None
+    host = "127.0.0.1"
+    no_auth = False
+    i = 0
+    while i < len(tokens):
+        t = tokens[i]
+        if t.isdigit():
+            port = int(t)
+        elif t == "--no-auth":
+            no_auth = True
+        elif t == "--host" and i + 1 < len(tokens):
+            host = tokens[i + 1]; i += 1
+        elif t.startswith("--host="):
+            host = t.split("=", 1)[1]
+        elif t.startswith("--port="):
+            try: port = int(t.split("=", 1)[1])
+            except ValueError: pass
+        else:
+            warn(f"Unknown /web arg: {t}  (try: [port] [--host H] [--no-auth])")
+            return True
+        i += 1
+
+    try:
+        from web.server import start_web_server
+    except ImportError as e:
+        err(f"Web module unavailable: {e}")
+        return True
+
+    def _run():
+        try:
+            start_web_server(port=port, host=host, no_auth=no_auth)
+        except SystemExit:
+            pass
+        except Exception as e:
+            import logging_utils as _log
+            _log.error("web_server_crashed", error=str(e)[:200])
+
+    _web_thread = threading.Thread(target=_run, daemon=True, name="web-server")
+    _web_thread.start()
+    time.sleep(0.3)  # let the banner print before the REPL redraws its prompt
+    info("Web server started in background. Continue typing — REPL is still live.")
+    return True
+
+
 def cmd_circuit(args: str, state, config) -> bool:
     """Inspect and manage per-provider circuit breakers.
 

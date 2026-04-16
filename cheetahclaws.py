@@ -35,6 +35,8 @@ Slash commands in REPL:
   /doctor     Diagnose installation health and tool connectivity
   /circuit    Show per-provider circuit breakers
   /circuit reset <provider|all>   Force-close a breaker (recover from circuit_open_skip)
+  /web [port] [--host H] [--no-auth]  Start web terminal / chat UI in background
+  /web status  Show whether the web server is running
   /memory [query]         Show/search persistent memories
   /memory consolidate     Extract long-term insights from current session via AI
   /skills           List available skills
@@ -199,7 +201,7 @@ from commands.config_cmd import (
 from commands.core import (
     cmd_help, cmd_clear, cmd_context, cmd_cost, cmd_compact,
     cmd_init, cmd_export, cmd_copy, cmd_status, cmd_doctor,
-    cmd_proactive, cmd_image, cmd_circuit, run_setup_wizard,
+    cmd_proactive, cmd_image, cmd_circuit, cmd_web, run_setup_wizard,
 )
 
 # ── Checkpoint / Plan commands ─────────────────────────────────────────────
@@ -377,6 +379,7 @@ COMMANDS = {
     "status":      cmd_status,
     "doctor":      cmd_doctor,
     "circuit":     cmd_circuit,
+    "web":         cmd_web,
     "setup":       lambda a, s, c: (run_setup_wizard(c), True)[1],
     "exit":        cmd_exit,
     "quit":        cmd_exit,
@@ -512,6 +515,7 @@ _CMD_META: dict[str, tuple[str, list[str]]] = {
     "status":      ("Show session status and model info",   []),
     "doctor":      ("Diagnose installation health",         []),
     "circuit":     ("Show / reset per-provider circuit breakers", ["status", "reset"]),
+    "web":         ("Start the web terminal / chat UI in background", ["status", "--no-auth", "--host"]),
     "setup":       ("Run interactive setup wizard",         []),
     "exit":        ("Exit cheetahclaws",              []),
     "quit":        ("Exit (alias for /exit)",             []),
