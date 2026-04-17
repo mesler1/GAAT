@@ -159,7 +159,7 @@ def load_skills(include_builtins: bool = True) -> list[SkillDef]:
         src = "user" if i == 0 else "project"
         if not skill_dir.is_dir():
             continue
-        for md_file in sorted(skill_dir.glob("*.md")):
+        for md_file in _iter_skill_files(skill_dir):
             skill = _parse_skill_file(md_file, source=src)
             if skill:
                 seen[skill.name] = skill
