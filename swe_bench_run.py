@@ -347,6 +347,9 @@ def _parse_args() -> argparse.Namespace:
                    help="Directory for cloned repos and output (default: ./swe_workspace).")
     p.add_argument("--instances", nargs="*", metavar="ID",
                    help="Run only these instance IDs (default: all).")
+    p.add_argument("--limit", "-n", type=int, metavar="N",
+                   help="Run at most N instances (taken from the top of the dataset "
+                        "after any --instances filter). Useful for quick smoke tests.")
     p.add_argument("--model", "-m", metavar="MODEL",
                    help="Model override passed to run_task.py.")
     p.add_argument("--workers", "-w", type=int, default=2, metavar="N",
@@ -387,6 +390,9 @@ def main() -> None:
                   file=sys.stderr)
     else:
         instances = all_instances
+
+    if args.limit and args.limit > 0:
+        instances = instances[: args.limit]
 
     total = len(instances)
     model_label = args.model or "gaat-default"
