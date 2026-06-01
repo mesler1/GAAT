@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cheetahclaws"
+name = "gaat"
 version = "3.05.75"
-description = "CheetahClaws: An Extensible, Python-Native Agent System for Autonomous Multi-Model Workflows"
+description = "GAAT: A lean, extensible Python-native AI coding CLI with context management, tools, sub-agents, memory, and skills"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -29,10 +29,13 @@ web         = ["sqlalchemy>=2.0", "bcrypt>=4.0", "PyJWT>=2.8.0"]
 all         = ["sounddevice", "Pillow", "prompt_toolkit>=3.0.43", "playwright", "pymupdf", "openpyxl", "pytesseract", "yfinance>=0.2.30", "rank-bm25>=0.2.2", "sqlalchemy>=2.0", "bcrypt>=4.0", "PyJWT>=2.8.0"]
 
 [project.scripts]
-cheetahclaws = "cheetahclaws:main"
+gaat = "gaat:main"
+cheetahclaws = "cheetahclaws:main"  # legacy alias, kept for backward compat
 
 [tool.setuptools]
 py-modules = [
+    "gaat",
+    "run_task",
     "cheetahclaws",
     "agent",
     "agent_runner",
