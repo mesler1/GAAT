@@ -9,6 +9,7 @@ Usage:
   python run_task.py "Fix the failing test in tests/test_foo.py"
   python run_task.py "Add type hints to utils.py" --verify "pytest tests/" --cwd /path/to/repo
   python run_task.py "Refactor auth module" --model gpt-4o --timeout 300
+  python run_task.py "Fix the bug" --output-patch patch.diff --cwd /path/to/repo
   echo "Fix the bug" | python run_task.py -
 
 Exit codes:
@@ -75,6 +76,18 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Show thinking blocks and token counts.",
     )
+    p.add_argument(
+        "--output-patch",
+        metavar="FILE",
+        help="Write 'git diff HEAD' to FILE after the agent finishes. "
+             "Useful for SWE-bench and patch-based evaluation.",
+    )
+    p.add_argument(
+        "--system-prompt",
+        metavar="FILE",
+        help="Path to a plain-text or markdown file whose contents replace "
+             "the default system prompt.",
+    )
     return p.parse_args()
 
 
@@ -97,6 +110,20 @@ def _run_verify(cmd: str, cwd: str | None) -> int:
     print(f"\n── verify: {cmd}", flush=True)
     result = subprocess.run(cmd, shell=True, cwd=cwd)
     return result.returncode
+
+
+def _write_patch(path: str, cwd: str | None) -> str:
+    """Capture 'git diff HEAD' and write to path. Returns patch text."""
+    result = subprocess.run(
+        ["git", "diff", "HEAD"],
+        capture_output=True, text=True, cwd=cwd or ".",
+    )
+    patch = result.stdout
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(patch, encoding="utf-8")
+    lines = patch.count("\n")
+    print(f"── patch: {lines} lines → {path}", flush=True)
+    return patch
 
 
 def main() -> None:
@@ -126,7 +153,10 @@ def main() -> None:
     # ── Build system prompt ──────────────────────────────────────────────────
     from context import build_system_prompt
 
-    system_prompt = build_system_prompt()
+    if args.system_prompt:
+        system_prompt = Path(args.system_prompt).read_text(encoding="utf-8")
+    else:
+        system_prompt = build_system_prompt()
 
     # ── Run agent ────────────────────────────────────────────────────────────
     from agent import AgentState, run, TextChunk, ThinkingChunk, ToolStart, ToolEnd, TurnDone, PermissionRequest
@@ -184,6 +214,10 @@ def main() -> None:
     if agent_error:
         print(f"run_task: agent error: {agent_error}", file=sys.stderr)
         sys.exit(2)
+
+    # ── Patch capture ────────────────────────────────────────────────────────
+    if args.output_patch:
+        _write_patch(args.output_patch, cwd)
 
     # ── Verify ───────────────────────────────────────────────────────────────
     if args.verify:
